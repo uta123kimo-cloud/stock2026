@@ -180,7 +180,7 @@ h4, h5, h6 { color: var(--accent2) !important; }
 .market-bar {
     display: flex;
     gap: 16px;
-    background: #f5f5f5;
+    background: var(--bg-panel);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 12px 20px;
