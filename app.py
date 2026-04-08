@@ -324,7 +324,7 @@ def call_gemini(prompt: str, api_key: str) -> str:
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemma-3-27b-it")
+        model = genai.GenerativeModel("gemma-4-31b-it")
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
