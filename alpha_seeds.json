@@ -1,0 +1,12 @@
+[
+  {"Ticker": "3037", "Path": "Pure",   "t_stat": 3.2, "EV_Threshold": 0.07},
+  {"Ticker": "6206", "Path": "Pure",   "t_stat": 2.8, "EV_Threshold": 0.06},
+  {"Ticker": "3708", "Path": "Pure",   "t_stat": 3.5, "EV_Threshold": 0.08},
+  {"Ticker": "8096", "Path": "Alive",  "t_stat": 2.4, "EV_Threshold": 0.05},
+  {"Ticker": "3706", "Path": "Alive",  "t_stat": 2.1, "EV_Threshold": 0.04},
+  {"Ticker": "2330", "Path": "Flicker","t_stat": 1.8, "EV_Threshold": 0.03},
+  {"Ticker": "2317", "Path": "Alive",  "t_stat": 2.0, "EV_Threshold": 0.04},
+  {"Ticker": "NVDA", "Path": "Pure",   "t_stat": 4.1, "EV_Threshold": 0.09},
+  {"Ticker": "TSLA", "Path": "Flicker","t_stat": 1.5, "EV_Threshold": 0.02},
+  {"Ticker": "AAPL", "Path": "Alive",  "t_stat": 2.6, "EV_Threshold": 0.05}
+]

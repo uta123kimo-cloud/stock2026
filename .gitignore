@@ -1,0 +1,14 @@
+# 機密金鑰 — 絕對不可上傳
+.env
+
+# Python 快取
+__pycache__/
+*.pyc
+*.pyo
+
+# Streamlit 快取
+.streamlit/
+
+# 本地數據
+alpha_seeds.json
+*.csv
