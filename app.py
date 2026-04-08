@@ -423,9 +423,15 @@ def call_gemini(prompt: str, api_key: str) -> str:
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemma-4-31b-it")
-        response = model.generate_content(prompt)
-        return response.text
+        # 優先 gemma-3-27b-it，fallback gemini-2.0-flash
+        for model_name in ["gemma-3-27b-it", "gemini-2.0-flash", "gemini-1.5-flash"]:
+            try:
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(prompt)
+                return response.text
+            except Exception:
+                continue
+        return "❌ 所有模型均無法回應，請稍後重試"
     except Exception as e:
         return f"❌ Gemini 呼叫失敗：{e}"
 
@@ -908,7 +914,8 @@ def render_sidebar():
                 data = json.load(uploaded)
                 with open(ALPHA_SEEDS_PATH, "w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
-                st.success(f"✅ 已更新 {len(data)} 筆種子")
+                st.cache_data.clear()   # 清除快取，確保下次掃描套用新種子
+                st.success(f"✅ 已更新 {len(data)} 筆種子，快取已重置，請重新執行掃描")
             except Exception as e:
                 st.error(f"解析失敗: {e}")
 
@@ -957,7 +964,10 @@ def main():
         ai_btn = st.button("🤖 Gemini 深度分析", use_container_width=True)
     with ai_col2:
         if st.session_state.ai_summary:
-            st.markdown(f"""<div class="ai-summary">{st.session_state.ai_summary}</div>""",
+            # 使用 st.markdown 原生渲染，避免 HTML 雜訊
+            import html as _html
+            _safe = _html.escape(st.session_state.ai_summary).replace('\n', '<br>')
+            st.markdown(f"""<div class="ai-summary">{_safe}</div>""",
                         unsafe_allow_html=True)
 
     if ai_btn:
@@ -1033,7 +1043,7 @@ def main():
                 show_all = st.checkbox("顯示全部（含未通過）", value=False)
             with col_f2:
                 sort_by = st.selectbox("排序依據",
-                    ["Slope Z", "VRI", "PVO", "EV期望值", "Score", "最佳勝率10%"], index=0)
+                    ["最佳勝率10%", "Slope Z", "VRI", "PVO", "EV期望值", "Score"], index=0)
             with col_f3:
                 min_vri = st.slider("VRI 最低門檻", 0, 100, 40)
 
@@ -1084,13 +1094,20 @@ def main():
 
             if table_rows:
                 sort_col_map = {
+                    "最佳勝率10%": "最佳勝率10%",
                     "Slope Z": "Slope Z", "VRI": "VRI", "PVO": "PVO",
-                    "EV期望值": "EV%", "Score": "Score", "最佳勝率10%": "最佳勝率10%"
+                    "EV期望值": "EV%", "Score": "Score",
                 }
                 df_table = pd.DataFrame(table_rows)
-                sort_col = sort_col_map.get(sort_by, "Slope Z")
-                if sort_col in df_table.columns:
-                    df_table = df_table.sort_values(sort_col, ascending=False, na_position='last')
+                sort_col = sort_col_map.get(sort_by, "最佳勝率10%")
+                # 命中型態優先，次要排序為所選欄位
+                df_table["_has_pattern"] = df_table["高勝率型態"].ne("—").astype(int)
+                secondary = sort_col if sort_col in df_table.columns else "Slope Z"
+                df_table = df_table.sort_values(
+                    ["_has_pattern", secondary],
+                    ascending=[False, False],
+                    na_position='last'
+                ).drop(columns=["_has_pattern"])
 
                 st.markdown(f"**共 {len(df_table)} 檔符合條件**　｜　"
                             f"🏆 命中高勝率型態: **{df_table['高勝率型態'].ne('—').sum()}** 檔")
