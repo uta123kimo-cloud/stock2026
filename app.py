@@ -1,5 +1,5 @@
 """
-app.py — 資源法 AI 戰情室
+app.py — 資源法 AI 戰情室-0409-1
 Streamlit 主程式 | 台股/美股雙軌 | 四層數據防火牆
 """
 
@@ -115,12 +115,12 @@ h4, h5, h6 { color: var(--accent2) !important; }
 }
 
 [data-testid="stTab"] button {
-    color: var(--text-dim) !important;
+    color: #1e293b !important;
     font-family: 'Noto Sans TC', sans-serif !important;
     font-weight: 500 !important;
 }
 [data-testid="stTab"] button[aria-selected="true"] {
-    color: var(--accent) !important;
+    color: #000000 !important;
     border-bottom: 2px solid var(--accent) !important;
     font-weight: 700 !important;
 }
@@ -362,6 +362,39 @@ def classify_pattern(dec: dict) -> dict:
         "is_key_pattern": len(patterns) > 0,
         "best_win10": max([p["win10"] for p in patterns], default=0),
     }
+
+
+def translate_path(path_str: str) -> str:
+    """將英文路徑狀態翻譯為中文"""
+    mapping = {
+        "Alive Stage1-Only": "存活(僅Stage1)",
+        "Alive":             "存活",
+        "Stage1-Only":       "僅Stage1",
+        "Dead":              "淘汰",
+        "N/A":               "未知",
+    }
+    if not path_str or path_str == "---":
+        return path_str
+    for eng, chn in mapping.items():
+        if eng in str(path_str):
+            return str(path_str).replace(eng, chn)
+    return path_str
+
+
+def calc_vri_ratio(df) -> float:
+    """VRI波動 = 近20天內 VRI > 75(健康水溫上限)的天數 / 20"""
+    if df is None or df.empty or "VRI" not in df.columns:
+        return 0.0
+    recent = df["VRI"].tail(20)
+    return round((recent > 75).sum() / min(len(recent), 20), 2)
+
+
+def calc_pvo_ratio(df) -> float:
+    """PVO波動 = 近20天內 PVO > 0（資金流入或主力點火）的天數 / 20"""
+    if df is None or df.empty or "PVO" not in df.columns:
+        return 0.0
+    recent = df["PVO"].tail(20)
+    return round((recent > 0).sum() / min(len(recent), 20), 2)
 
 
 def is_final_candidate(dec: dict, s2: dict) -> bool:
@@ -695,6 +728,10 @@ def render_stock_card(sym: str, res: dict, show_final_badge: bool = False):
     ev_color   = "#059669" if (isinstance(ev, (int, float)) and ev > 3) else "#d97706"
     mkt_tag    = "🇹🇼" if market == "TW" else "🇺🇸"
     t_stat_str = f"t={t_stat:.1f}" if t_stat is not None else "N/A"
+    path = translate_path(str(path))
+    df_ind = res.get("indicator_df")
+    vri_ratio = calc_vri_ratio(df_ind)
+    pvo_ratio = calc_pvo_ratio(df_ind)
 
     final_badge_html = ""
     if show_final_badge and pat["is_key_pattern"] and s2.get("pass"):
@@ -728,6 +765,12 @@ def render_stock_card(sym: str, res: dict, show_final_badge: bool = False):
             <div class="data-item">階段1篩選: <span>{s1_pass}</span></div>
             <div class="data-item">V12.1路徑: <span>{s2_pass} {path} {t_stat_str}</span></div>
             <div class="data-item">數據健康: <span>{health_icon}</span></div>
+        </div>
+        <div class="data-row" style="margin-top:6px;">
+            <div class="data-item">VRI波動: <span style="color:#0891b2;font-weight:700;">{vri_ratio:.0%}</span>
+                <small style="color:#94a3b8">（20日內&gt;健康水溫天數）</small></div>
+            <div class="data-item">PVO波動: <span style="color:#059669;font-weight:700;">{pvo_ratio:.0%}</span>
+                <small style="color:#94a3b8">（20日內資金流入或點火天數）</small></div>
         </div>
         <div class="ev-bar">
             💰 EV 期望值: <span style="color:{ev_color};font-weight:700;">
@@ -1067,6 +1110,7 @@ def main():
                 pat_codes = " + ".join([p["code"] for p in pat["patterns"]]) if pat["patterns"] else "—"
                 pat_desc  = " | ".join([p["label"].split(" ", 1)[-1] for p in pat["patterns"]]) if pat["patterns"] else "—"
 
+                df_ind_tab = res.get("indicator_df")
                 table_rows.append({
                     "代號":        sym,
                     "市場":        "🇹🇼" if res.get("market") == "TW" else "🇺🇸",
@@ -1078,10 +1122,12 @@ def main():
                     "型態說明":    pat_desc,
                     "PVO":         dec.get("pvo", 0),
                     "VRI":         dec.get("vri", 0),
+                    "VRI波動":     calc_vri_ratio(df_ind_tab),
+                    "PVO波動":     calc_pvo_ratio(df_ind_tab),
                     "Slope Z":     dec.get("slope_z", 0),
                     "Score":       dec.get("score", 0),
                     "EV%":         s2.get("ev", None),
-                    "路徑":        s2.get("path", "N/A"),
+                    "路徑":        translate_path(str(s2.get("path", "N/A"))),
                     "t值":         s2.get("t_stat", None),
                     "投信10日":    trust.get("trust_net_10d", None),
                     "S1":          "✅" if s1.get("pass") else "❌",
@@ -1119,6 +1165,8 @@ def main():
                         "現價":        st.column_config.NumberColumn(format="%.2f"),
                         "PVO":         st.column_config.NumberColumn(format="%.2f"),
                         "VRI":         st.column_config.NumberColumn(format="%.1f"),
+                        "VRI波動":     st.column_config.NumberColumn(format="%.0%", help="近20日VRI>健康水溫(75)天數/20"),
+                        "PVO波動":     st.column_config.NumberColumn(format="%.0%", help="近20日PVO>0(資金流入或點火)天數/20"),
                         "Slope Z":     st.column_config.NumberColumn(format="%.2f"),
                         "EV%":         st.column_config.NumberColumn(format="%.1f"),
                         "最佳勝率10%": st.column_config.NumberColumn(format="%.1f%%", help="命中型態的最高10%勝率"),
@@ -1171,11 +1219,15 @@ def main():
                 for sym, res in final_picks:
                     dec = res.get("decision", {})
                     s2  = res.get("stage2", {})
+                    df_ind = res.get("indicator_df")
                     pat = classify_pattern(dec)
                     pat_labels = " ｜ ".join([p["label"] for p in pat["patterns"]])
                     win_str = f"最高勝率10%: {pat['best_win10']:.1f}%"
+                    vri_ratio = calc_vri_ratio(df_ind)
+                    pvo_ratio = calc_pvo_ratio(df_ind)
+                    path_zh = translate_path(str(s2.get("path","N/A")))
 
-                    # 緊湊摘要列
+                    # 緊湊摘要列（唯一顯示，移除重複卡片）
                     st.markdown(f"""
                     <div style="background:#eff6ff;border:1px solid #93c5fd;border-left:4px solid #1a56db;
                          border-radius:8px;padding:10px 16px;margin-bottom:6px;">
@@ -1188,11 +1240,12 @@ def main():
                             VRI: <b>{dec.get('vri',0):.1f}</b> ｜
                             PVO: <b>{dec.get('pvo',0):+.2f}</b> ｜
                             EV: <b style="color:#059669">{s2.get('ev','N/A')}%</b> ｜
-                            路徑: {s2.get('path','N/A')}
+                            路徑: {path_zh} ｜
+                            VRI波動: <b style="color:#0891b2">{vri_ratio:.0%}</b> ｜
+                            PVO波動: <b style="color:#059669">{pvo_ratio:.0%}</b>
                         </span>
                     </div>
                     """, unsafe_allow_html=True)
-                    render_stock_card(sym, res, show_final_badge=True)
             else:
                 st.info("🔍 目前無標的同時符合三大型態 + Stage2 條件，請查看下方做多訊號")
 
