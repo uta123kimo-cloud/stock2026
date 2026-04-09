@@ -326,6 +326,54 @@ button[data-baseweb="tab"][aria-selected="true"] p { color: #000000 !important; 
 /* Sidebar text */
 [data-testid="stSidebar"] label, [data-testid="stSidebar"] p,
 [data-testid="stSidebar"] span:not([style*="color"]) { color: #1e293b !important; }
+# 在第 328 行後添加以下 CSS 規則
+
+/* ─── 新增：Selectbox 下拉式選單樣式 ─── */
+[data-testid="stSelectbox"] label,
+[data-testid="stSelectbox"] label * {
+    color: #1e293b !important;
+}
+
+/* Selectbox 下拉選單背景和文字 */
+[data-baseweb="select"] {
+    background-color: #ffffff !important;
+}
+
+[data-baseweb="select"] * {
+    color: #dc2626 !important;
+}
+
+/* 選項容器（下拉展開時）*/
+[role="listbox"],
+[role="option"] {
+    background-color: #ffffff !important;
+    color: #dc2626 !important;
+}
+
+[role="option"]:hover {
+    background-color: #f5f5f5 !important;
+    color: #dc2626 !important;
+}
+
+[role="option"][aria-selected="true"] {
+    background-color: #fef2f2 !important;
+    color: #dc2626 !important;
+    font-weight: 700 !important;
+}
+
+/* BaseWeb Select 容器 */
+[data-baseweb="popover"] {
+    background-color: #ffffff !important;
+}
+
+/* Selectbox 輸入框 */
+.st-g0 [role="combobox"],
+.st-au input[type="text"] {
+    background-color: #ffffff !important;
+    color: #dc2626 !important;
+    border: 1px solid #e2e8f0 !important;
+}
+
 
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg-main); }
