@@ -1,5 +1,5 @@
 """
-app.py — 資源法 AI 戰情室-0409-1
+app.py — 資源法 AI 戰情室-0409-2
 Streamlit 主程式 | 台股/美股雙軌 | 四層數據防火牆
 """
 
@@ -114,15 +114,26 @@ h4, h5, h6 { color: var(--accent2) !important; }
     transform: translateY(-1px);
 }
 
-[data-testid="stTab"] button {
+[data-testid="stTab"] button,
+[data-testid="stTab"] button p,
+[data-testid="stTab"] button span {
     color: #1e293b !important;
     font-family: 'Noto Sans TC', sans-serif !important;
     font-weight: 500 !important;
 }
-[data-testid="stTab"] button[aria-selected="true"] {
+[data-testid="stTab"] button[aria-selected="true"],
+[data-testid="stTab"] button[aria-selected="true"] p,
+[data-testid="stTab"] button[aria-selected="true"] span {
     color: #000000 !important;
     border-bottom: 2px solid var(--accent) !important;
     font-weight: 700 !important;
+}
+/* Radio 按鈕（台股/美股）字色黑色 */
+[data-testid="stRadio"] label,
+[data-testid="stRadio"] label span,
+[data-testid="stRadio"] p {
+    color: #1e293b !important;
+    font-weight: 500 !important;
 }
 
 /* 股票卡片 */
@@ -382,11 +393,11 @@ def translate_path(path_str: str) -> str:
 
 
 def calc_vri_ratio(df) -> float:
-    """VRI波動 = 近20天內 VRI > 75(健康水溫上限)的天數 / 20"""
+    """VRI波動 = 近20天內 VRI > 40（健康水溫下限，代表有效能量）的天數 / 20"""
     if df is None or df.empty or "VRI" not in df.columns:
         return 0.0
     recent = df["VRI"].tail(20)
-    return round((recent > 75).sum() / min(len(recent), 20), 2)
+    return round((recent > 40).sum() / min(len(recent), 20), 2)
 
 
 def calc_pvo_ratio(df) -> float:
@@ -732,11 +743,20 @@ def render_stock_card(sym: str, res: dict, show_final_badge: bool = False):
     df_ind = res.get("indicator_df")
     vri_ratio = calc_vri_ratio(df_ind)
     pvo_ratio = calc_pvo_ratio(df_ind)
+    import html as _html_mod
+    # 用 escape 防止 emoji / 特殊字元破壞 HTML 結構
+    pvo_status_s = _html_mod.escape(str(pvo_status))
+    vri_status_s = _html_mod.escape(str(vri_status))
+    sig_level_s  = _html_mod.escape(str(sig_level))
+    action_s     = _html_mod.escape(str(action))
+    last_action_s= _html_mod.escape(str(last_action))
 
     final_badge_html = ""
     if show_final_badge and pat["is_key_pattern"] and s2.get("pass"):
         final_badge_html = f'<span class="badge badge-final">⭐ 最終決策候選</span>'
 
+    ev_str = f"+{ev:.1f}%" if isinstance(ev, (int, float)) else str(ev)
+    trust_html = f"&nbsp;&nbsp;|&nbsp;&nbsp; 🏦 {trust_label}" if trust_label else ""
     st.markdown(f"""
     <div class="stock-card {card_extra}">
         <div class="card-header">
@@ -745,38 +765,31 @@ def render_stock_card(sym: str, res: dict, show_final_badge: bool = False):
             {badge} {final_badge_html}
         </div>
         {pattern_html}
-        <div style="font-size:0.84rem; color:#0891b2; margin-bottom:6px; font-weight:600;">
-            [ AI 判定: {action} ] {sig_level} | 前次: {last_action}
+        <div style="font-size:0.84rem;color:#0891b2;margin-bottom:4px;font-weight:600;">
+            AI判定: <b>{action_s}</b> {sig_level_s} &nbsp;|&nbsp; 前次: {last_action_s}
         </div>
         <div class="data-row">
-            <div class="data-item">狀態: <span>{pvo_status}</span> / <span>{vri_status}</span></div>
+            <div class="data-item">PVO狀態: <span>{pvo_status_s}</span></div>
+            <div class="data-item">VRI狀態: <span>{vri_status_s}</span></div>
         </div>
         <div class="data-row">
-            <div class="data-item">PVO: <span style="color:{pvo_color}">{pvo:+.2f}</span>
-                <small style="color:#94a3b8">（>10主力點火 / >0資金流入 / <0縮量）</small></div>
-        </div>
-        <div class="data-row">
-            <div class="data-item">VRI: <span style="color:{vri_color}">{vri:.1f}</span>
-                <small style="color:#94a3b8">（40-75健康 / >90過熱 / <40情緒整理）</small></div>
-            <div class="data-item">Slope: <span style="color:{slope_color}">{slope:+.3f}%</span></div>
+            <div class="data-item">PVO: <span style="color:{pvo_color};font-weight:700;">{pvo:+.2f}</span></div>
+            <div class="data-item">VRI: <span style="color:{vri_color};font-weight:700;">{vri:.1f}</span></div>
+            <div class="data-item">Slope: <span style="color:{slope_color};">{slope:+.3f}%</span></div>
             <div class="data-item">Slope Z: <span style="color:#1a56db;font-weight:700;">{slope_z:+.2f}</span></div>
-        </div>
-        <div class="data-row" style="margin-top:8px;">
-            <div class="data-item">階段1篩選: <span>{s1_pass}</span></div>
-            <div class="data-item">V12.1路徑: <span>{s2_pass} {path} {t_stat_str}</span></div>
-            <div class="data-item">數據健康: <span>{health_icon}</span></div>
         </div>
         <div class="data-row" style="margin-top:6px;">
             <div class="data-item">VRI波動: <span style="color:#0891b2;font-weight:700;">{vri_ratio:.0%}</span>
-                <small style="color:#94a3b8">（20日內&gt;健康水溫天數）</small></div>
+                <small style="color:#94a3b8">（20日&gt;40天數/20）</small></div>
             <div class="data-item">PVO波動: <span style="color:#059669;font-weight:700;">{pvo_ratio:.0%}</span>
-                <small style="color:#94a3b8">（20日內資金流入或點火天數）</small></div>
+                <small style="color:#94a3b8">（20日&gt;0天數/20）</small></div>
         </div>
-        <div class="ev-bar">
-            💰 EV 期望值: <span style="color:{ev_color};font-weight:700;">
-                {f'+{ev:.1f}%' if isinstance(ev,(int,float)) else ev}
-            </span>
-            {"&nbsp;&nbsp;|&nbsp;&nbsp; 🏦 " + trust_label if trust_label else ""}
+        <div class="data-row" style="margin-top:6px;">
+            <div class="data-item">S1: <span>{s1_pass}</span></div>
+            <div class="data-item">路徑: <span>{s2_pass} {path} {t_stat_str}</span></div>
+            <div class="data-item">健康: <span>{health_icon}</span></div>
+            <div class="data-item">💰 EV: <span style="color:{ev_color};font-weight:700;">{ev_str}</span>
+                {trust_html}</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -951,6 +964,12 @@ def render_sidebar():
 
         st.markdown("---")
         st.markdown("### 🗂️ V12.1 Alpha Seeds")
+        st.caption(
+            "📌 **用途**：Alpha Seeds 是 V12.1 路徑篩選（Stage2）的歷史回測種子庫，"
+            "記錄哪些路徑組合具統計顯著性（t值/EV）。"
+            "上傳後系統會以此進行 Stage2 比對，提升決策候選準確率。"
+            "未上傳時退回規則引擎模式（Stage1 alone）。"
+        )
         uploaded = st.file_uploader("上傳 alpha_seeds.json", type=["json"])
         if uploaded:
             try:
@@ -1165,7 +1184,7 @@ def main():
                         "現價":        st.column_config.NumberColumn(format="%.2f"),
                         "PVO":         st.column_config.NumberColumn(format="%.2f"),
                         "VRI":         st.column_config.NumberColumn(format="%.1f"),
-                        "VRI波動":     st.column_config.NumberColumn(format="%.0%", help="近20日VRI>健康水溫(75)天數/20"),
+                        "VRI波動":     st.column_config.NumberColumn(format="%.0%", help="近20日VRI>40（有效能量）天數/20"),
                         "PVO波動":     st.column_config.NumberColumn(format="%.0%", help="近20日PVO>0(資金流入或點火)天數/20"),
                         "Slope Z":     st.column_config.NumberColumn(format="%.2f"),
                         "EV%":         st.column_config.NumberColumn(format="%.1f"),
@@ -1306,12 +1325,13 @@ def main():
                 for sym, res in neutral_stocks[:20]:
                     dec = res.get("decision", {})
                     pat = classify_pattern(dec)
-                    pat_tag = f" 🏷️ 型態{'/'.join([p['code'] for p in pat['patterns']])}" if pat["patterns"] else ""
+                    pat_tag = f" 型態{'/ '.join([p['code'] for p in pat['patterns']])}" if pat["patterns"] else ""
+                    pvo_st = dec.get("pvo_status","")
                     st.markdown(
-                        f"**{sym}**{pat_tag} — {dec.get('pvo_status','')} | "
-                        f"Slope Z: {dec.get('slope_z',0):+.2f} | "
-                        f"VRI: {dec.get('vri',0):.1f} | "
-                        f"PVO: {dec.get('pvo',0):+.2f}"
+                        f"**{sym}**{pat_tag} — {pvo_st} ｜ "
+                        f"Slope Z: `{dec.get('slope_z',0):+.2f}` ｜ "
+                        f"VRI: `{dec.get('vri',0):.1f}` ｜ "
+                        f"PVO: `{dec.get('pvo',0):+.2f}`"
                     )
 
             # 選中個股詳細圖
