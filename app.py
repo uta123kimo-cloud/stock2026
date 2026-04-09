@@ -235,7 +235,7 @@ h4, h5, h6 { color: var(--accent2) !important; }
     border-radius: var(--radius);
     padding: 16px 20px;
     margin: 16px 0;
-    font-size: 0.9rem;
+    font-size: 1.1rem;
     line-height: 1.8;
     color: var(--text);
     box-shadow: var(--shadow);
