@@ -1,5 +1,5 @@
 """
-app.py — 資源法 AI 戰情室-0409-2
+app.py — 資源法 AI 戰情室
 Streamlit 主程式 | 台股/美股雙軌 | 四層數據防火牆
 """
 
@@ -58,6 +58,15 @@ st.set_page_config(
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Noto+Sans+TC:wght@400;600;700;900&display=swap');
+
+/* ── 核心修正：強制覆蓋 Streamlit/BaseWeb 所有文字顏色 ── */
+/* 用 :is() 提高 specificity，對抗 BaseWeb inline style */
+:is(body, .stApp, [data-testid]) p,
+:is(body, .stApp, [data-testid]) span:not([style*="color"]),
+:is(body, .stApp, [data-testid]) label,
+:is(body, .stApp, [data-testid]) div:not([style*="color"]) {
+    color: #1e293b;
+}
 
 :root {
     --bg-main:    #f4f6fb;
@@ -289,6 +298,35 @@ h4, h5, h6 { color: var(--accent2) !important; }
 .stDataFrame { background: var(--bg-panel) !important; border-radius: var(--radius) !important; }
 .stAlert { border-radius: var(--radius) !important; }
 
+/* ── Tab / Radio / Checkbox / Label 字色 — 多層保險 ── */
+/* 方法1: data-testid */
+[data-testid="stCheckbox"] label, [data-testid="stCheckbox"] label *,
+[data-testid="stSelectbox"] label, [data-testid="stSelectbox"] label *,
+[data-testid="stSlider"] label, [data-testid="stSlider"] label *,
+[data-testid="stRadio"] label, [data-testid="stRadio"] label *,
+[data-testid="stRadio"] div[role="radiogroup"] label,
+[data-testid="stRadio"] div[role="radiogroup"] p { color: #1e293b !important; }
+/* 方法2: BaseWeb selector（電腦瀏覽器 Streamlit 實際用的） */
+[data-baseweb="radio"] label, [data-baseweb="radio"] label *,
+[data-baseweb="checkbox"] label, [data-baseweb="checkbox"] label *,
+[data-baseweb="tab"] { color: #1e293b !important; }
+[data-baseweb="tab"][aria-selected="true"] { color: #000000 !important; font-weight:700 !important; }
+/* 方法3: role-based */
+[role="tab"] { color: #1e293b !important; }
+[role="tab"][aria-selected="true"] { color: #000000 !important; font-weight:700 !important; }
+[role="radio"] + div, [role="radio"] + div * { color: #1e293b !important; }
+/* 方法4: button[data-baseweb] — Streamlit tab 實際 DOM */
+button[data-baseweb="tab"], button[data-baseweb="tab"] span,
+button[data-baseweb="tab"] p { color: #1e293b !important; }
+button[data-baseweb="tab"][aria-selected="true"],
+button[data-baseweb="tab"][aria-selected="true"] span,
+button[data-baseweb="tab"][aria-selected="true"] p { color: #000000 !important; }
+/* Checkbox accent */
+[data-testid="stCheckbox"] input[type="checkbox"] { accent-color: #1a56db; }
+/* Sidebar text */
+[data-testid="stSidebar"] label, [data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span:not([style*="color"]) { color: #1e293b !important; }
+
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg-main); }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
@@ -300,13 +338,29 @@ h4, h5, h6 { color: var(--accent2) !important; }
 # 常數
 # ===========================================================================
 DEFAULT_TW_WATCHLIST = [
-    "3037", "6206", "3708", "8096", "3706", "2330", "2317", "2454",
-    "2308", "2382", "3711", "2412", "3231", "2379", "3008", "2395",
-    "3045", "2327", "2408", "6669", "3034", "2345", "2474", "4938",
-    "3443", "2353", "2324", "2603", "2609", "6515", "3661", "3583",
-    "6415", "3035", "6231", "1802", "3708", "2313", "2301", "2375", "8358"
+    "3030", "3706", "8096", "2313", "4958",
+    "2330", "2317", "2454", "2308", "2382", "2303", "3711", "2412", "2357", "3231",
+    "2379", "3008", "2395", "3045", "2327", "2408", "2377", "6669", "2301", "3034",
+    "2345", "2474", "3037", "4938", "3443", "2353", "2324", "2603", "2609", "1513",
+    "3293", "3680", "3529", "3131", "5274", "6223", "6805", "3017", "3324", "6515",
+    "3661", "3583", "6139", "3035", "1560", "8299", "3558", "6187", "3406", "3217",
+    "6176", "6415", "6206", "8069", "3264", "5269", "2360", "6271", "3189", "6438",
+    "8358", "6231", "2449", "3030", "8016", "6679", "3374", "3014", "3211",
+    "6213", "2404", "2480", "3596", "6202", "5443", "5347", "5483", "6147",
+    "2313", "3037", "8046", "2368", "4958", "2383", "6269", "5469", "5351",
+    "4909", "8050", "6153", "6505", "1802", "3708", "8213", "1325",
+    "2344", "6239", "3260", "4967", "6414", "2337", "8096",
+    "3551", "2436", "2375", "2492", "2456", "3229", "6173", "3533",
+    "3491", "6271", "2313", "2367", "6285", "6190",
+    "3062", "2419", "2314", "3305", "3105", "2312", "8086",
+    "3081", "2455", "6442", "3163", "4979", "3363", "6451",
+    "3450", "4908", "4977", "3234", "2360",
+    "1711","1727","2404","2489","3060","3374","3498","3535","3580","3587","3665","4749","4989","6187","6217","6290","6418","6443","6470","6542","6546","6706","6831","6861","6877","8028","8111"
+
 ]
-DEFAULT_US_WATCHLIST = ["NVDA", "TSLA", "AAPL", "MSFT", "AMZN", "META", "GOOGL"]
+DEFAULT_US_WATCHLIST = ["ABNB", "ADBE", "AMD", "GOOGL", "GOOG", "AMZN", "AEP", "AMGN", "ADI", "AAPL", "AMAT", "ASML", "AXON", "TEAM", "ADSK", "ADP", "ARM", "APP", "AZN", "BIIB", "BKNG", "BKR", "AVGO", "CCEP", "CDNS", "CDW", "CEG", "CHTR", "CTAS", "CSCO", "CSGP", "CTSH", "CMCSA", "CPRT", "COST", "CRWD", "CSX", "DASH", "DDOG", "DXCM", "EA", "EXC", "FANG", "FAST", "META", "FTNT", "GEHC", "GFS", "GILD", "HON", "IDXX", "INTC", "INTU", "ISRG", "KDP", "KLAC", "KHC", "LRCX", "LIN", "LULU", "MAR", "MDB", "MRVL", "MELI", "MCHP", "MU", "MSFT", "MSTR", "MDLZ", "MNST", "NFLX", "NVDA", "NXPI", "ODFL", "ON", "ORLY", "PANW", "PCAR", "PAYX", "PYPL", "PEP", "PDD", "PLTR", "QCOM", "REGN", "ROP", "ROST", "SBUX", "SNPS", "TMUS", "TSLA", "TTWO", "TTD", "TXN", "VRSK", "VRTX", "WBD", "WDAY", "XEL", "ZS", "AMKR", "COHR", "CRUS", "ENTG", "LSCC", "MPWR", "MTSI", "ONTO", "QRVO", "SWKS", "TER", "TSM", "MMM", "ABT", "ABBV", "ACN", "AES", "AFL", "A", "APD", "AKAM", "ALB", "ARE", "ALGN", "ALLE", "LNT", "ALL", "MO", "AMCR", "AEE", "AAL", "AXP", "AIG", "AMT", "AWK", "AMP", "ABCB", "AME", "APH", "AON", "AOS", "APA", "APTV", "ACGL", "ADM", "ANET", "AJG", "AIZ", "T", "ATO", "AZO", "AVB", "AVY", "CBLL", "TBLL", "BAC", "BBWI", "BAX", "BDX", "BRK-B", "BBY", "BG", "BIO", "BLDR", "BLK", "BK", "BA", "BWA", "BXP", "BSX", "BMY", "BR", "BF-B", "BX", "CHRW", "CZR", "CPB", "COF", "CAH", "KMX", "CCL", "CARR", "CAT", "CBOE", "CBRE", "CE", "CNC", "CNP", "CF", "CRL", "SCHW", "CVX", "CMG", "CB", "CHD", "CI", "CINF", "C", "CFG", "CLX", "CME", "CMS", "KO", "CL", "CMA", "CAG", "COP", "ED", "STZ", "COO", "GLW", "CTVA", "CCI", "CMI", "CVS", "DHI", "DHR", "DRI", "DVA", "DE", "DAL", "DVN", "DECK", "DLR", "DG", "DLTR", "D", "DPZ", "DOV", "DOW", "DTE", "DUK", "DD", "EMN", "ETN", "EBAY", "ECL", "EIX", "EW", "EMR", "ENPH", "ETR", "EOG", "EQT", "EFX", "EQIX", "EQR", "ESS", "EL", "ETSY", "EVRG", "ES", "EXPE", "EXPD", "EXR", "XOM", "FFIV", "FB", "FRT", "FDX", "FICO", "FIS", "FITB", "FE", "FMC", "F", "FTV", "FOXA", "FOX", "BEN", "FCX", "GRMN", "IT", "GNRC", "GD", "GE", "GEV", "GIS", "GM", "GPC", "GL", "GPN", "GS", "GWW", "HAL", "HBI", "HIG", "HAS", "HCA", "HSIC", "HSY", "HPE", "HLT", "HOLX", "HD", "HRL", "HST", "HWM", "HPQ", "HUBB", "HUM", "HBAN", "HII", "IEX", "INFO", "ITW", "ILMN", "INCY", "IR", "ICE", "IBM", "IP", "IPG", "IFF", "IVZ", "INVH", "IQV", "IRM", "JKHY", "J", "JBHT", "JBL", "SJM", "JNJ", "JCI", "JPM", "K", "KEY", "KEYS", "KMB", "KIM", "KMI", "KR", "KVUE", "LHX", "LH", "LW", "LVS", "LEG", "LDOS", "LEN", "LLY", "LYV", "LKQ", "LMT", "L", "LOW", "LYB", "MTB", "MPC", "MKTX", "MMC", "MLM", "MAS", "MA", "MKC", "MCD", "MCK", "MDT", "MRK", "MET", "MTD", "MGM", "MAA", "MRNA", "MHK", "TAP", "MCO", "MS", "MOS", "MSI", "MSCI", "NDAQ", "NTAP", "NEM", "NWSA", "NWS", "NEE", "NKE", "NI", "NSC", "NTRS", "NOC", "NCLH", "NOV", "NRG", "NUE", "NVR", "OXY", "OMC", "OKE", "ORCL", "OTIS", "PKG", "PH", "PAYC", "PNR", "PRGO", "PFE", "PCG", "PM", "PSX", "PNW", "PNC", "PODD", "POOL", "PPG", "PPL", "PFG", "PG", "PGR", "PLD", "PRU", "PTC", "PEG", "PSA", "PHM", "PWR", "DGX", "RL", "RJF", "RTX", "O", "REG", "RF", "RSG", "RMD", "RHI", "ROK", "ROL", "RCL", "SPGI", "CRM", "SBAC", "SLB", "STLD", "STX", "SRE", "NOW", "SHW", "SMCI", "SPG", "SNA", "SO", "SOLV", "LUV", "SWK", "STT", "STE", "SYK", "SYF", "SYY", "TECH", "TROW", "TPR", "TRGP", "TGT", "TEL", "TDY", "TFX", "TXT", "TMO", "TJX", "TSCO", "TT", "TDG", "TRV", "TRMB", "TFC", "TYL", "TSN", "UBER", "UDR", "ULTA", "USB", "UNP", "UAL", "UNH", "UPS", "URI", "UHS", "UNM", "VLTO", "VLO", "VTR", "VRSN", "VZ", "VTRS", "V", "VMC", "VST", "WRB", "WAB", "WMT", "WBA", "DIS", "WM", "WAT", "WEC", "WFC", "WELL", "WST", "WDC", "WU", "WRK", "WY", "WMB", "WLTW", "WYNN", "XLNX", "XYL", "YUM", "ZBRA", "ZBH", "ZTS", "PARA"
+
+                       ]
 BENCHMARK_TW = "0050.TW"
 BENCHMARK_US = "SPY"
 LOOKBACK_DAYS = 180
@@ -443,6 +497,48 @@ init_session()
 
 
 # ===========================================================================
+# JS 強制修正文字顏色（針對電腦瀏覽器 Streamlit/BaseWeb 覆蓋問題）
+# ===========================================================================
+def inject_color_fix():
+    """用 JS MutationObserver 持續監控並強制 tab/radio/label 文字黑色"""
+    import streamlit.components.v1 as components
+    components.html("""
+    <script>
+    (function() {
+        function fixColors() {
+            // Tab buttons
+            document.querySelectorAll('button[data-baseweb="tab"]').forEach(el => {
+                el.style.color = '#1e293b';
+                el.querySelectorAll('*').forEach(c => c.style.color = '#1e293b');
+            });
+            document.querySelectorAll('button[data-baseweb="tab"][aria-selected="true"]').forEach(el => {
+                el.style.color = '#000000';
+                el.querySelectorAll('*').forEach(c => c.style.color = '#000000');
+            });
+            // Radio labels
+            document.querySelectorAll('[data-baseweb="radio"] label, [data-testid="stRadio"] label').forEach(el => {
+                el.style.color = '#1e293b';
+                el.querySelectorAll('*').forEach(c => { if(!c.style.color || c.style.color === 'rgb(250, 250, 250)') c.style.color = '#1e293b'; });
+            });
+            // Checkbox labels
+            document.querySelectorAll('[data-testid="stCheckbox"] label, [data-baseweb="checkbox"] label').forEach(el => {
+                el.style.color = '#1e293b';
+            });
+            // Sidebar labels / selectbox / slider
+            document.querySelectorAll('[data-testid="stSidebar"] label, [data-testid="stSidebar"] p').forEach(el => {
+                el.style.color = '#1e293b';
+            });
+        }
+        // 立即執行 + MutationObserver 監控 DOM 變化
+        fixColors();
+        const obs = new MutationObserver(fixColors);
+        obs.observe(document.body, { childList: true, subtree: true });
+    })();
+    </script>
+    """, height=0, scrolling=False)
+
+
+# ===========================================================================
 # 數據獲取
 # ===========================================================================
 @st.cache_data(ttl=900, show_spinner=False)
@@ -511,8 +607,9 @@ def build_gemini_prompt(scan_results: dict, market_sentiment: dict,
 {picks_text}
 
 請直接回答（中文，不超過200字）：
-1. 大盤風險評估（1句，含具體數字）
-2. 最值得操作的1-2檔及理由（各30字）
+以股票分析師與統計學專家 就統計數據與技術指標分析
+1.大盤風險評估（1句，含具體數字）
+2. 最值得操作的1-3檔及理由（各30字）
 3. 今日建議持倉水位（百分比）
 4. 風險警示（1句）
 
@@ -663,21 +760,29 @@ def get_card_class(direction: str) -> str:
 
 
 def get_badge(direction: str) -> str:
+    _b = "display:inline-block;padding:3px 10px;border-radius:6px;font-size:0.75rem;font-weight:700;"
     if direction == "做多":
-        return '<span class="badge badge-bull">▲ 做多</span>'
+        return f'<span style="{_b}background:#d1fae5;color:#065f46;border:1px solid #6ee7b7;">▲ 做多</span>'
     if direction == "做空":
-        return '<span class="badge badge-bear">▼ 做空</span>'
-    return '<span class="badge badge-neutral">◆ 觀望</span>'
+        return f'<span style="{_b}background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;">▼ 做空</span>'
+    return f'<span style="{_b}background:#fef3c7;color:#92400e;border:1px solid #fcd34d;">◆ 觀望</span>'
 
 
 def render_pattern_badges(patterns: list) -> str:
-    """渲染勝率型態徽章 HTML"""
+    """渲染勝率型態徽章 HTML（全 inline style）"""
     if not patterns:
         return ""
+    _css_map = {
+        "pattern-a": "background:#d1fae5;color:#065f46;border:1px solid #34d399;",
+        "pattern-b": "background:#fee2e2;color:#991b1b;border:1px solid #f87171;",
+        "pattern-c": "background:#fef3c7;color:#92400e;border:1px solid #fbbf24;",
+    }
+    _base = "display:inline-flex;align-items:center;padding:4px 12px;border-radius:20px;font-size:0.78rem;font-weight:700;margin:4px 2px;"
     html = '<div style="margin:6px 0;">'
     for p in patterns:
         win20_str = f" / 勝率20%: {p['win20']}%" if p.get("win20") else ""
-        html += f'<span class="{p["css"]} pattern-tag" title="{p["desc"]}">{p["label"]} 勝率10%: {p["win10"]}%{win20_str}</span>'
+        _style = _base + _css_map.get(p["css"], "")
+        html += f'<span style="{_style}" title="{p["desc"]}">{p["label"]} 勝率10%: {p["win10"]}%{win20_str}</span>'
     html += "</div>"
     return html
 
@@ -686,12 +791,12 @@ def render_stock_card(sym: str, res: dict, show_final_badge: bool = False):
     """渲染股票卡片"""
     if res.get("error"):
         st.markdown(f"""
-        <div class="stock-card bearish">
-            <div class="card-header">
-                <span class="ticker-name">{sym}</span>
-                <span class="badge badge-bear">❌ 錯誤</span>
-            </div>
-            <div style="color:#94a3b8;font-size:0.8rem;">{res['error']}</div>
+        <div style="background:#fff5f5;border:1px solid #fca5a5;border-left:4px solid #dc2626;
+                    border-radius:10px;padding:10px 16px;margin-bottom:10px;">
+            <span style="font-weight:800;color:#dc2626;">{sym}</span>
+            <span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:6px;
+                         background:#fee2e2;color:#991b1b;font-size:0.75rem;font-weight:700;">❌ 錯誤</span>
+            <div style="color:#94a3b8;font-size:0.8rem;margin-top:4px;">{res['error']}</div>
         </div>
         """, unsafe_allow_html=True)
         return
@@ -753,44 +858,58 @@ def render_stock_card(sym: str, res: dict, show_final_badge: bool = False):
 
     final_badge_html = ""
     if show_final_badge and pat["is_key_pattern"] and s2.get("pass"):
-        final_badge_html = f'<span class="badge badge-final">⭐ 最終決策候選</span>'
+        final_badge_html = '<span style="display:inline-block;padding:3px 10px;border-radius:6px;font-size:0.75rem;font-weight:700;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;">⭐ 最終決策候選</span>'
 
     ev_str = f"+{ev:.1f}%" if isinstance(ev, (int, float)) else str(ev)
-    trust_html = f"&nbsp;&nbsp;|&nbsp;&nbsp; 🏦 {trust_label}" if trust_label else ""
+    trust_section = f"&nbsp;|&nbsp; 🏦 {trust_label}" if trust_label else ""
+    # 卡片左邊框顏色
+    if show_final_badge and pat["is_key_pattern"]:
+        _border_color = "#1a56db"; _bg = "linear-gradient(135deg,#eff6ff,#ffffff)"
+    elif direction == "做多":
+        _border_color = "#059669"; _bg = "#ffffff"
+    elif direction == "做空":
+        _border_color = "#dc2626"; _bg = "#ffffff"
+    else:
+        _border_color = "#0891b2"; _bg = "#ffffff"
+    _row = "display:flex;gap:16px;flex-wrap:wrap;margin-top:5px;"
+    _lbl = "font-size:0.8rem;color:#64748b;"
+    _val = "font-size:0.8rem;"
     st.markdown(f"""
-    <div class="stock-card {card_extra}">
-        <div class="card-header">
-            <span class="ticker-name">{mkt_tag} {sym}</span>
-            <span class="price-tag">{"NT$" if market == "TW" else "$"} {close_px:,.2f}</span>
-            {badge} {final_badge_html}
-        </div>
-        {pattern_html}
-        <div style="font-size:0.84rem;color:#0891b2;margin-bottom:4px;font-weight:600;">
-            AI判定: <b>{action_s}</b> {sig_level_s} &nbsp;|&nbsp; 前次: {last_action_s}
-        </div>
-        <div class="data-row">
-            <div class="data-item">PVO狀態: <span>{pvo_status_s}</span></div>
-            <div class="data-item">VRI狀態: <span>{vri_status_s}</span></div>
-        </div>
-        <div class="data-row">
-            <div class="data-item">PVO: <span style="color:{pvo_color};font-weight:700;">{pvo:+.2f}</span></div>
-            <div class="data-item">VRI: <span style="color:{vri_color};font-weight:700;">{vri:.1f}</span></div>
-            <div class="data-item">Slope: <span style="color:{slope_color};">{slope:+.3f}%</span></div>
-            <div class="data-item">Slope Z: <span style="color:#1a56db;font-weight:700;">{slope_z:+.2f}</span></div>
-        </div>
-        <div class="data-row" style="margin-top:6px;">
-            <div class="data-item">VRI波動: <span style="color:#0891b2;font-weight:700;">{vri_ratio:.0%}</span>
-                <small style="color:#94a3b8">（20日&gt;40天數/20）</small></div>
-            <div class="data-item">PVO波動: <span style="color:#059669;font-weight:700;">{pvo_ratio:.0%}</span>
-                <small style="color:#94a3b8">（20日&gt;0天數/20）</small></div>
-        </div>
-        <div class="data-row" style="margin-top:6px;">
-            <div class="data-item">S1: <span>{s1_pass}</span></div>
-            <div class="data-item">路徑: <span>{s2_pass} {path} {t_stat_str}</span></div>
-            <div class="data-item">健康: <span>{health_icon}</span></div>
-            <div class="data-item">💰 EV: <span style="color:{ev_color};font-weight:700;">{ev_str}</span>
-                {trust_html}</div>
-        </div>
+    <div style="background:{_bg};border:1px solid #e2e8f0;border-left:4px solid {_border_color};
+                border-radius:10px;padding:12px 16px;margin-bottom:10px;
+                box-shadow:0 1px 4px rgba(30,41,59,0.07);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <span style="font-size:1.05rem;font-weight:800;color:#1a56db;">{mkt_tag} {sym}</span>
+        <span style="font-size:1.05rem;font-weight:600;font-family:monospace;">
+            {"NT$" if market == "TW" else "$"} {close_px:,.2f}
+        </span>
+        <span>{badge} {final_badge_html}</span>
+      </div>
+      {pattern_html}
+      <div style="font-size:0.82rem;color:#0891b2;font-weight:600;margin-bottom:4px;">
+        AI判定: <b>{action_s}</b>&nbsp;{sig_level_s}&nbsp;｜&nbsp;前次: {last_action_s}
+      </div>
+      <div style="{_row}">
+        <span style="{_lbl}">狀態:&nbsp;<b style="color:#1e293b;">{pvo_status_s}</b>&nbsp;/&nbsp;<b style="color:#1e293b;">{vri_status_s}</b></span>
+      </div>
+      <div style="{_row}">
+        <span style="{_lbl}">PVO:&nbsp;<b style="color:{pvo_color};">{pvo:+.2f}</b></span>
+        <span style="{_lbl}">VRI:&nbsp;<b style="color:{vri_color};">{vri:.1f}</b></span>
+        <span style="{_lbl}">Slope:&nbsp;<b style="color:{slope_color};">{slope:+.3f}%</b></span>
+        <span style="{_lbl}">Slope Z:&nbsp;<b style="color:#1a56db;">{slope_z:+.2f}</b></span>
+      </div>
+      <div style="{_row}">
+        <span style="{_lbl}">VRI波動:&nbsp;<b style="color:#0891b2;">{vri_ratio:.0%}</b>
+            <small style="color:#94a3b8;">（20日&gt;40天數/20）</small></span>
+        <span style="{_lbl}">PVO波動:&nbsp;<b style="color:#059669;">{pvo_ratio:.0%}</b>
+            <small style="color:#94a3b8;">（20日&gt;0天數/20）</small></span>
+      </div>
+      <div style="{_row}">
+        <span style="{_lbl}">S1:&nbsp;{s1_pass}</span>
+        <span style="{_lbl}">路徑:&nbsp;{s2_pass}&nbsp;{path}&nbsp;{t_stat_str}</span>
+        <span style="{_lbl}">健康:&nbsp;{health_icon}</span>
+        <span style="{_lbl}">💰 EV:&nbsp;<b style="color:{ev_color};">{ev_str}</b>{trust_section}</span>
+      </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -994,6 +1113,7 @@ def render_sidebar():
 # 主頁面
 # ===========================================================================
 def main():
+    inject_color_fix()   # 電腦瀏覽器文字顏色修正
     render_sidebar()
 
     col_title, col_scan = st.columns([4, 1])
@@ -1089,13 +1209,14 @@ def main():
             st.info("請先執行掃描")
         else:
             # 勝率型態說明
-            st.markdown("""
+            _pt = "display:inline-flex;align-items:center;padding:4px 12px;border-radius:20px;font-size:0.78rem;font-weight:700;margin:3px 2px;"
+            st.markdown(f"""
             <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:12px 18px;margin-bottom:16px;">
             <b style="color:#0369a1;">📊 高勝率型態識別</b>
-            <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;">
-                <span class="pattern-a pattern-tag">📈 A: 資金流入＋情緒整理＋強力買進 &nbsp;勝率10%: 52.6% / 20%: 37.6%&nbsp; 主升段最佳</span>
-                <span class="pattern-b pattern-tag">🔥 B: 主力點火＋擁擠過熱＋強力買進 &nbsp;勝率10%: 52.4%&nbsp; 超短線爆發</span>
-                <span class="pattern-c pattern-tag">🌡️ C: VRI擁擠過熱＋強力買進 &nbsp;勝率10%: 59.0% / 20%: 42.6%&nbsp; 最高勝率</span>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                <span style="{_pt}background:#d1fae5;color:#065f46;border:1px solid #34d399;">📈 A: 資金流入＋情緒整理＋強力買進 &nbsp;勝率10%: 52.6% / 20%: 37.6%&nbsp; 主升段最佳</span>
+                <span style="{_pt}background:#fee2e2;color:#991b1b;border:1px solid #f87171;">🔥 B: 主力點火＋擁擠過熱＋強力買進 &nbsp;勝率10%: 52.4%&nbsp; 超短線爆發</span>
+                <span style="{_pt}background:#fef3c7;color:#92400e;border:1px solid #fbbf24;">🌡️ C: VRI擁擠過熱＋強力買進 &nbsp;勝率10%: 59.0% / 20%: 42.6%&nbsp; 最高勝率</span>
             </div>
             </div>
             """, unsafe_allow_html=True)
@@ -1252,7 +1373,7 @@ def main():
                          border-radius:8px;padding:10px 16px;margin-bottom:6px;">
                         <b style="color:#1e40af;font-size:1rem;">🇹🇼 {sym}</b>
                         <span style="color:#64748b;font-size:0.82rem;margin-left:8px;">{pat_labels}</span>
-                        <span class="pattern-c pattern-tag" style="float:right;">{win_str}</span>
+                        <span style="float:right;display:inline-block;padding:3px 10px;border-radius:6px;font-size:0.78rem;font-weight:700;background:#fef3c7;color:#92400e;border:1px solid #fbbf24;">{win_str}</span>
                         <br>
                         <span style="font-size:0.83rem;color:#475569;">
                             Slope Z: <b style="color:#1a56db">{dec.get('slope_z',0):+.2f}</b> ｜
@@ -1316,7 +1437,7 @@ def main():
                                and r.get("decision", {}).get("direction") == "觀望"]
 
             if bear_stocks:
-                st.markdown(f"### 🔴 做空/警示 ({len(bear_stocks)} 檔)")
+                st.markdown(f"### 🔴 做空/警示 ({len(bear_stocks)} 檔)", unsafe_allow_html=False)
                 for sym, res in bear_stocks[:5]:
                     render_stock_card(sym, res)
 
