@@ -1,6 +1,10 @@
 """
 app.py — 資源法 AI 戰情室
 Streamlit 主程式 | 台股/美股雙軌 | 四層數據防火牆
+修改版本：
+  [新增1] 個股 Gemini 分析欄位（Gemini 分析下方）
+  [新增2] 數據排名顯示所有個股 EV/T值，並增加「上漲10%機率/停利/停損」欄位
+  [新增3] 做多股票顯示條件滿足當天日期（數據排名 + 決策戰情室）
 """
 
 import streamlit as st
@@ -53,13 +57,12 @@ st.set_page_config(
 )
 
 # ===========================================================================
-# 全域 CSS — 淺色系精緻風格
+# 全域 CSS
 # ===========================================================================
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Noto+Sans+TC:wght@400;600;700;900&display=swap');
 
-/* ── 核心修正：強制覆蓋 Streamlit/BaseWeb 所有文字顏色 ── */
 :is(body, .stApp, [data-testid]) p,
 :is(body, .stApp, [data-testid]) span:not([style*="color"]),
 :is(body, .stApp, [data-testid]) label,
@@ -70,7 +73,7 @@ st.markdown("""
 :root {
     --bg-main:    #f4f6fb;
     --bg-panel:   #ffffff;
-    --bg-card:    #f9fafе;
+    --bg-card:    #f9fafe;
     --bg-card2:   #eef1f8;
     --accent:     #1a56db;
     --accent2:    #0891b2;
@@ -143,7 +146,6 @@ h4, h5, h6 { color: var(--accent2) !important; }
     font-weight: 500 !important;
 }
 
-/* 股票卡片 */
 .stock-card {
     background: var(--bg-panel);
     border: 1px solid var(--border);
@@ -191,7 +193,6 @@ h4, h5, h6 { color: var(--accent2) !important; }
 
 .ev-bar { margin-top: 8px; font-size: 0.85rem; color: var(--text); }
 
-/* 勝率標籤 */
 .pattern-tag {
     display: inline-flex;
     align-items: center;
@@ -207,7 +208,6 @@ h4, h5, h6 { color: var(--accent2) !important; }
 .pattern-c { background: #fef3c7; color: #92400e; border: 1px solid #fbbf24; }
 .pattern-final { background: #dbeafe; color: #1e40af; border: 1px solid #60a5fa; font-size: 0.85rem; padding: 5px 14px; }
 
-/* 大盤儀表 */
 .market-bar {
     display: flex;
     gap: 12px;
@@ -227,7 +227,6 @@ h4, h5, h6 { color: var(--accent2) !important; }
 .bear-val { color: var(--red); }
 .neutral-val { color: var(--accent); }
 
-/* AI 摘要 */
 .ai-summary {
     background: linear-gradient(135deg, #eff6ff, #f8faff);
     border: 1px solid #bfdbfe;
@@ -241,7 +240,20 @@ h4, h5, h6 { color: var(--accent2) !important; }
     box-shadow: var(--shadow);
 }
 
-/* 狀態列 */
+/* [新增1] 個股分析區塊樣式 */
+.stock-ai-box {
+    background: linear-gradient(135deg, #f0fdf4, #f8faff);
+    border: 1px solid #bbf7d0;
+    border-left: 4px solid #059669;
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    margin: 12px 0;
+    font-size: 1.0rem;
+    line-height: 1.8;
+    color: var(--text);
+    box-shadow: var(--shadow);
+}
+
 .status-bar {
     background: var(--bg-panel);
     border: 1px solid var(--border);
@@ -265,7 +277,6 @@ h4, h5, h6 { color: var(--accent2) !important; }
 .health-err { color: var(--red); font-weight: 700; }
 .health-warn{ color: var(--amber); font-weight: 700; }
 
-/* 決策戰情室標題區塊 */
 .decision-header {
     background: linear-gradient(135deg, #1a56db08, #0891b208);
     border: 1px solid var(--border);
@@ -275,7 +286,6 @@ h4, h5, h6 { color: var(--accent2) !important; }
     margin: 16px 0 8px 0;
 }
 
-/* 最終決策標記 */
 .final-decision-box {
     background: linear-gradient(135deg, #dbeafe, #eff6ff);
     border: 2px solid var(--accent);
@@ -285,7 +295,19 @@ h4, h5, h6 { color: var(--accent2) !important; }
     box-shadow: 0 4px 16px rgba(26,86,219,0.12);
 }
 
-/* 輸入框 */
+/* [新增3] 條件滿足日期標籤 */
+.signal-date-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    background: #fef9c3;
+    color: #713f12;
+    border: 1px solid #fde047;
+    margin-left: 8px;
+}
+
 .stTextInput input, .stNumberInput input, .stSelectbox select {
     background: var(--bg-panel) !important;
     color: var(--text) !important;
@@ -319,52 +341,13 @@ button[data-baseweb="tab"][aria-selected="true"] p { color: #000000 !important; 
 [data-testid="stSidebar"] span:not([style*="color"]) { color: #1e293b !important; }
 
 [data-testid="stSelectbox"] label,
-[data-testid="stSelectbox"] label * {
-    color: #1e293b !important;
-}
-[data-baseweb="select"] {
-    background-color: #ffffff !important;
-}
-[data-baseweb="select"] * {
-    color: #dc2626 !important;
-}
-[role="listbox"],
-[role="option"] {
-    background-color: #ffffff !important;
-    color: #dc2626 !important;
-}
-[role="option"]:hover {
-    background-color: #f5f5f5 !important;
-    color: #dc2626 !important;
-}
-[role="option"][aria-selected="true"] {
-    background-color: #fef2f2 !important;
-    color: #dc2626 !important;
-    font-weight: 700 !important;
-}
-[data-testid="stDateInput"] [role="listbox"],
-[data-testid="stDateInput"] [role="option"],
-[data-testid="stDateInput"] div[role="listbox"],
-[data-baseweb="select"] [role="listbox"] {
-    background-color: #ffffff !important;
-    color: #000000 !important;
-}
-[data-testid="stDateInput"] [role="option"],
-[data-baseweb="select"] [role="option"] {
-    background-color: #ffffff !important;
-    color: #000000 !important;
-}
-[data-testid="stDateInput"] [role="option"]:hover,
-[data-baseweb="select"] [role="option"]:hover {
-    background-color: #f5f5f5 !important;
-    color: #000000 !important;
-}
-[data-testid="stDateInput"] [role="option"][aria-selected="true"],
-[data-baseweb="select"] [role="option"][aria-selected="true"] {
-    background-color: #fef2f2 !important;
-    color: #dc2626 !important;
-    font-weight: 700 !important;
-}
+[data-testid="stSelectbox"] label * { color: #1e293b !important; }
+[data-baseweb="select"] { background-color: #ffffff !important; }
+[data-baseweb="select"] * { color: #dc2626 !important; }
+[role="listbox"], [role="option"] { background-color: #ffffff !important; color: #dc2626 !important; }
+[role="option"]:hover { background-color: #f5f5f5 !important; color: #dc2626 !important; }
+[role="option"][aria-selected="true"] { background-color: #fef2f2 !important; color: #dc2626 !important; font-weight: 700 !important; }
+
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg-main); }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
@@ -395,12 +378,11 @@ DEFAULT_TW_WATCHLIST = [
     "3450", "4908", "4977", "3234", "2360",
     "1711","1727","2404","2489","3060","3374","3498","3535","3580","3587","3665","4749","4989","6187","6217","6290","6418","6443","6470","6542","6546","6706","6831","6861","6877","8028","8111"
 ]
-DEFAULT_US_WATCHLIST = ["ABNB", "ADBE", "AMD", "GOOGL", "GOOG", "AMZN", "AEP", "AMGN", "ADI", "AAPL", "AMAT", "ASML", "AXON", "TEAM", "ADSK", "ADP", "ARM", "APP", "AZN", "BIIB", "BKNG", "BKR", "AVGO", "CCEP", "CDNS", "CDW", "CEG", "CHTR", "CTAS", "CSCO", "CSGP", "CTSH", "CMCSA", "CPRT", "COST", "CRWD", "CSX", "DASH", "DDOG", "DXCM", "EA", "EXC", "FANG", "FAST", "META", "FTNT", "GEHC", "GFS", "GILD", "HON", "IDXX", "INTC", "INTU", "ISRG", "KDP", "KLAC", "KHC", "LRCX", "LIN", "LULU", "MAR", "MDB", "MRVL", "MELI", "MCHP", "MU", "MSFT", "MSTR", "MDLZ", "MNST", "NFLX", "NVDA", "NXPI", "ODFL", "ON", "ORLY", "PANW", "PCAR", "PAYX", "PYPL", "PEP", "PDD", "PLTR", "QCOM", "REGN", "ROP", "ROST", "SBUX", "SNPS", "TMUS", "TSLA", "TTWO", "TTD", "TXN", "VRSK", "VRTX", "WBD", "WDAY", "XEL", "ZS", "AMKR", "COHR", "CRUS", "ENTG", "LSCC", "MPWR", "MTSI", "ONTO", "QRVO", "SWKS", "TER", "TSM", "MMM", "ABT", "ABBV", "ACN", "AES", "AFL", "A", "APD", "AKAM", "ALB", "ARE", "ALGN", "ALLE", "LNT", "ALL", "MO", "AMCR", "AEE", "AAL", "AXP", "AIG", "AMT", "AWK", "AMP", "ABCB", "AME", "APH", "AON", "AOS", "APA", "APTV", "ACGL", "ADM", "ANET", "AJG", "AIZ", "T", "ATO", "AZO", "AVB", "AVY", "CBLL", "TBLL", "BAC", "BBWI", "BAX", "BDX", "BRK-B", "BBY", "BG", "BIO", "BLDR", "BLK", "BK", "BA", "BWA", "BXP", "BSX", "BMY", "BR", "BF-B", "BX", "CHRW", "CZR", "CPB", "COF", "CAH", "KMX", "CCL", "CARR", "CAT", "CBOE", "CBRE", "CE", "CNC", "CNP", "CF", "CRL", "SCHW", "CVX", "CMG", "CB", "CHD", "CI", "CINF", "C", "CFG", "CLX", "CME", "CMS", "KO", "CL", "CMA", "CAG", "COP", "ED", "STZ", "COO", "GLW", "CTVA", "CCI", "CMI", "CVS", "DHI", "DHR", "DRI", "DVA", "DE", "DAL", "DVN", "DECK", "DLR", "DG", "DLTR", "D", "DPZ", "DOV", "DOW", "DTE", "DUK", "DD", "EMN", "ETN", "EBAY", "ECL", "EIX", "EW", "EMR", "ENPH", "ETR", "EOG", "EQT", "EFX", "EQIX", "EQR", "ESS", "EL", "ETSY", "EVRG", "ES", "EXPE", "EXPD", "EXR", "XOM", "FFIV", "FB", "FRT", "FDX", "FICO", "FIS", "FITB", "FE", "FMC", "F", "FTV", "FOXA", "FOX", "BEN", "FCX", "GRMN", "IT", "GNRC", "GD", "GE", "GEV", "GIS", "GM", "GPC", "GL", "GPN", "GS", "GWW", "HAL", "HBI", "HIG", "HAS", "HCA", "HSIC", "HSY", "HPE", "HLT", "HOLX", "HD", "HRL", "HST", "HWM", "HPQ", "HUBB", "HUM", "HBAN", "HII", "IEX", "INFO", "ITW", "ILMN", "INCY", "IR", "ICE", "IBM", "IP", "IPG", "IFF", "IVZ", "INVH", "IQV", "IRM", "JKHY", "J", "JBHT", "JBL", "SJM", "JNJ", "JCI", "JPM", "K", "KEY", "KEYS", "KMB", "KIM", "KMI", "KR", "KVUE", "LHX", "LH", "LW", "LVS", "LEG", "LDOS", "LEN", "LLY", "LYV", "LKQ", "LMT", "L", "LOW", "LYB", "MTB", "MPC", "MKTX", "MMC", "MLM", "MAS", "MA", "MKC", "MCD", "MCK", "MDT", "MRK", "MET", "MTD", "MGM", "MAA", "MRNA", "MHK", "TAP", "MCO", "MS", "MOS", "MSI", "MSCI", "NDAQ", "NTAP", "NEM", "NWSA", "NWS", "NEE", "NKE", "NI", "NSC", "NTRS", "NOC", "NCLH", "NOV", "NRG", "NUE", "NVR", "OXY", "OMC", "OKE", "ORCL", "OTIS", "PKG", "PH", "PAYC", "PNR", "PRGO", "PFE", "PCG", "PM", "PSX", "PNW", "PNC", "PODD", "POOL", "PPG", "PPL", "PFG", "PG", "PGR", "PLD", "PRU", "PTC", "PEG", "PSA", "PHM", "PWR", "DGX", "RL", "RJF", "RTX", "O", "REG", "RF", "RSG", "RMD", "RHI", "ROK", "ROL", "RCL", "SPGI", "CRM", "SBAC", "SLB", "STLD", "STX", "SRE", "NOW", "SHW", "SMCI", "SPG", "SNA", "SO", "SOLV", "LUV", "SWK", "STT", "STE", "SYK", "SYF", "SYY", "TECH", "TROW", "TPR", "TRGP", "TGT", "TEL", "TDY", "TFX", "TXT", "TMO", "TJX", "TSCO", "TT", "TDG", "TRV", "TRMB", "TFC", "TYL", "TSN", "UBER", "UDR", "ULTA", "USB", "UNP", "UAL", "UNH", "UPS", "URI", "UHS", "UNM", "VLTO", "VLO", "VTR", "VRSN", "VZ", "VTRS", "V", "VMC", "VST", "WRB", "WAB", "WMT", "WBA", "DIS", "WM", "WAT", "WEC", "WFC", "WELL", "WST", "WDC", "WU", "WRK", "WY", "WMB", "WLTW", "WYNN", "XLNX", "XYL", "YUM", "ZBRA", "ZBH", "ZTS", "PARA"
+DEFAULT_US_WATCHLIST = ["ABNB", "ADBE", "AMD", "GOOGL", "GOOG", "AMZN", "AEP", "AMGN", "ADI", "AAPL", "AMAT", "ASML", "AXON", "TEAM", "ADSK", "ADP", "ARM", "APP", "AZN", "BIIB", "BKNG", "BKR", "AVGO", "CCEP", "CDNS", "CDW", "CEG", "CHTR", "CTAS", "CSCO", "CSGP", "CTSH", "CMCSA", "CPRT", "COST", "CRWD", "CSX", "DASH", "DDOG", "DXCM", "EA", "EXC", "FANG", "FAST", "META", "FTNT", "GEHC", "GFS", "GILD", "HON", "IDXX", "INTC", "INTU", "ISRG", "KDP", "KLAC", "KHC", "LRCX", "LIN", "LULU", "MAR", "MDB", "MRVL", "MELI", "MCHP", "MU", "MSFT", "MSTR", "MDLZ", "MNST", "NFLX", "NVDA", "NXPI", "ODFL", "ON", "ORLY", "PANW", "PCAR", "PAYX", "PYPL", "PEP", "PDD", "PLTR", "QCOM", "REGN", "ROP", "ROST", "SBUX", "SNPS", "TMUS", "TSLA", "TTWO", "TTD", "TXN", "VRSK", "VRTX", "WBD", "WDAY", "XEL", "ZS", "AMKR", "COHR", "CRUS", "ENTG", "LSCC", "MPWR", "MTSI", "ONTO", "QRVO", "SWKS", "TER", "TSM", "MMM", "ABT", "ABBV", "ACN", "AES", "AFL", "A", "APD", "AKAM", "ALB", "ARE", "ALGN", "ALLE", "LNT", "ALL", "MO", "AMCR", "AEE", "AAL", "AXP", "AIG", "AMT", "AWK", "AMP", "ABCB", "AME", "APH", "AON", "AOS", "APA", "APTV", "ACGL", "ADM", "ANET", "AJG", "AIZ", "T", "ATO", "AZO", "AVB", "AVY", "BAC", "BBWI", "BAX", "BDX", "BRK-B", "BBY", "BG", "BIO", "BLDR", "BLK", "BK", "BA", "BWA", "BXP", "BSX", "BMY", "BR", "BF-B", "BX", "CHRW", "CZR", "CPB", "COF", "CAH", "KMX", "CCL", "CARR", "CAT", "CBOE", "CBRE", "CE", "CNC", "CNP", "CF", "CRL", "SCHW", "CVX", "CMG", "CB", "CHD", "CI", "CINF", "C", "CFG", "CLX", "CME", "CMS", "KO", "CL", "CMA", "CAG", "COP", "ED", "STZ", "COO", "GLW", "CTVA", "CCI", "CMI", "CVS", "DHI", "DHR", "DRI", "DVA", "DE", "DAL", "DVN", "DECK", "DLR", "DG", "DLTR", "D", "DPZ", "DOV", "DOW", "DTE", "DUK", "DD", "EMN", "ETN", "EBAY", "ECL", "EIX", "EW", "EMR", "ENPH", "ETR", "EOG", "EQT", "EFX", "EQIX", "EQR", "ESS", "EL", "ETSY", "EVRG", "ES", "EXPE", "EXPD", "EXR", "XOM", "FFIV", "FRT", "FDX", "FICO", "FIS", "FITB", "FE", "FMC", "F", "FTV", "FOXA", "FOX", "BEN", "FCX", "GRMN", "IT", "GNRC", "GD", "GE", "GEV", "GIS", "GM", "GPC", "GL", "GPN", "GS", "GWW", "HAL", "HBI", "HIG", "HAS", "HCA", "HSIC", "HSY", "HPE", "HLT", "HOLX", "HD", "HRL", "HST", "HWM", "HPQ", "HUBB", "HUM", "HBAN", "HII", "IEX", "INFO", "ITW", "ILMN", "INCY", "IR", "ICE", "IBM", "IP", "IPG", "IFF", "IVZ", "INVH", "IQV", "IRM", "JKHY", "J", "JBHT", "JBL", "SJM", "JNJ", "JCI", "JPM", "K", "KEY", "KEYS", "KMB", "KIM", "KMI", "KR", "KVUE", "LHX", "LH", "LW", "LVS", "LEG", "LDOS", "LEN", "LLY", "LYV", "LKQ", "LMT", "L", "LOW", "LYB", "MTB", "MPC", "MKTX", "MMC", "MLM", "MAS", "MA", "MKC", "MCD", "MCK", "MDT", "MRK", "MET", "MTD", "MGM", "MAA", "MRNA", "MHK", "TAP", "MCO", "MS", "MOS", "MSI", "MSCI", "NDAQ", "NTAP", "NEM", "NWSA", "NWS", "NEE", "NKE", "NI", "NSC", "NTRS", "NOC", "NCLH", "NOV", "NRG", "NUE", "NVR", "OXY", "OMC", "OKE", "ORCL", "OTIS", "PKG", "PH", "PAYC", "PNR", "PRGO", "PFE", "PCG", "PM", "PSX", "PNW", "PNC", "PODD", "POOL", "PPG", "PPL", "PFG", "PG", "PGR", "PLD", "PRU", "PTC", "PEG", "PSA", "PHM", "PWR", "DGX", "RL", "RJF", "RTX", "O", "REG", "RF", "RSG", "RMD", "RHI", "ROK", "ROL", "RCL", "SPGI", "CRM", "SBAC", "SLB", "STLD", "STX", "SRE", "NOW", "SHW", "SMCI", "SPG", "SNA", "SO", "SOLV", "LUV", "SWK", "STT", "STE", "SYK", "SYF", "SYY", "TECH", "TROW", "TPR", "TRGP", "TGT", "TEL", "TDY", "TFX", "TXT", "TMO", "TJX", "TSCO", "TT", "TDG", "TRV", "TRMB", "TFC", "TYL", "TSN", "UBER", "UDR", "ULTA", "USB", "UNP", "UAL", "UNH", "UPS", "URI", "UHS", "UNM", "VLTO", "VLO", "VTR", "VRSN", "VZ", "VTRS", "V", "VMC", "VST", "WRB", "WAB", "WMT", "WBA", "DIS", "WM", "WAT", "WEC", "WFC", "WELL", "WST", "WDC", "WU", "WRK", "WY", "WMB", "WLTW", "WYNN", "XLNX", "XYL", "YUM", "ZBRA", "ZBH", "ZTS", "PARA"
 ]
 BENCHMARK_TW = "0050.TW"
 BENCHMARK_US = "SPY"
 LOOKBACK_DAYS = 180
-# ── [變更2] Alpha Seeds 路徑保留定義，但功能已停用 ──
 ALPHA_SEEDS_PATH = "alpha_seeds.json"
 
 
@@ -408,18 +390,11 @@ ALPHA_SEEDS_PATH = "alpha_seeds.json"
 # 勝率型態辨識
 # ===========================================================================
 def classify_pattern(dec: dict) -> dict:
-    """
-    辨識三大高勝率型態：
-    A: 資金流入 + 情緒整理 + 強力買進  → 勝率10%: 52.6%, 20%: 37.6%
-    B: 主力點火 + 擁擠過熱 + 強力買進  → 勝率10%: 52.4%
-    C: VRI擁擠過熱 + 強力買進          → 勝率10%: 59.0%, 20%: 42.6%
-    """
     action     = dec.get("action", "")
     pvo_status = dec.get("pvo_status", "")
     vri_status = dec.get("vri_status", "")
     vri        = dec.get("vri", 0)
     pvo        = dec.get("pvo", 0)
-    pvo_delta  = dec.get("pvo_delta", 0)
 
     is_strong_buy = (action == "強力買進")
     is_money_in   = ("資金流入" in pvo_status)
@@ -429,7 +404,6 @@ def classify_pattern(dec: dict) -> dict:
 
     patterns = []
 
-    # Pattern A: 資金流入 + 情緒整理 + 強力買進
     if is_strong_buy and is_money_in and is_cool:
         patterns.append({
             "code": "A",
@@ -439,7 +413,6 @@ def classify_pattern(dec: dict) -> dict:
             "desc": "穩 + 爆發兼具｜主升段最佳"
         })
 
-    # Pattern B: 主力點火 + 擁擠過熱 + 強力買進
     if is_strong_buy and is_fire and is_hot:
         patterns.append({
             "code": "B",
@@ -449,7 +422,6 @@ def classify_pattern(dec: dict) -> dict:
             "desc": "超短線爆發最強（風險偏高）"
         })
 
-    # Pattern C: VRI擁擠過熱 + 強力買進（最廣義，VRI>85 也納入）
     if is_strong_buy and (is_hot or vri > 85):
         patterns.append({
             "code": "C",
@@ -467,7 +439,6 @@ def classify_pattern(dec: dict) -> dict:
 
 
 def translate_path(path_str: str) -> str:
-    """將英文路徑狀態翻譯為中文"""
     mapping = {
         "Alive Stage1-Only": "存活(僅Stage1)",
         "Alive":             "存活",
@@ -484,7 +455,6 @@ def translate_path(path_str: str) -> str:
 
 
 def calc_vri_ratio(df) -> float:
-    """VRI波動 = 近20天內 VRI > 40（健康水溫下限）的天數 / 20"""
     if df is None or df.empty or "VRI" not in df.columns:
         return 0.0
     recent = df["VRI"].tail(20)
@@ -492,26 +462,94 @@ def calc_vri_ratio(df) -> float:
 
 
 def calc_pvo_ratio(df) -> float:
-    """PVO波動 = 近20天內 PVO > 0（資金流入或主力點火）的天數 / 20"""
     if df is None or df.empty or "PVO" not in df.columns:
         return 0.0
     recent = df["PVO"].tail(20)
     return round((recent > 0).sum() / min(len(recent), 20), 2)
 
 
-# ── [變更1] 最終決策候選條件更改：三大型態 + PVO波動率>0.6 + VRI波動率>0.6 ──
 def is_final_candidate(dec: dict, df_ind) -> bool:
-    """
-    判斷是否為最終決策候選
-    條件：命中三大高勝率型態之一 + PVO波動率 > 0.6 + VRI波動率 > 0.6
-    （已移除 Stage2 通過條件）
-    """
     pat = classify_pattern(dec)
     if not pat["is_key_pattern"]:
         return False
     pvo_ratio = calc_pvo_ratio(df_ind)
     vri_ratio = calc_vri_ratio(df_ind)
     return pvo_ratio > 0.6 and vri_ratio > 0.6
+
+
+# ===========================================================================
+# [新增2] 推算上漲10%機率、停利、停損
+# ===========================================================================
+def calc_upside_stats(dec: dict, df_ind, pat: dict) -> dict:
+    """
+    以統計方式推算：
+    - 上漲10%機率: 基於高勝率型態的win10勝率加權 + SlopeZ修正
+    - 停利價: 現價 * (1 + 目標報酬率)，目標報酬率以EV期望值為準，最低5%
+    - 停損價: 現價 * (1 - 停損比率)，停損比率=max(ATR倍數, 固定3%)
+    """
+    close = dec.get("close", 0)
+    if close <= 0:
+        return {"prob10": None, "tp": None, "sl": None}
+
+    slope_z = dec.get("slope_z", 0)
+    vri     = dec.get("vri", 0)
+    pvo     = dec.get("pvo", 0)
+    best_win10 = pat.get("best_win10", 0)
+
+    # 上漲10%機率推算（基礎勝率 + SlopeZ貢獻 + VRI/PVO修正）
+    base_prob = best_win10 if best_win10 > 0 else 30.0
+    slope_bonus = min(slope_z * 3.0, 15.0) if slope_z > 0 else max(slope_z * 3.0, -15.0)
+    vri_bonus = 5.0 if 40 <= vri <= 75 else (3.0 if vri > 75 else -3.0)
+    pvo_bonus = 5.0 if pvo > 10 else (2.0 if pvo > 0 else -5.0)
+    prob10 = min(max(base_prob + slope_bonus + vri_bonus + pvo_bonus, 5.0), 95.0)
+
+    # ATR 估算（用近20日高低差均值）
+    atr_pct = 0.05  # 預設5%
+    if df_ind is not None and not df_ind.empty:
+        if "High" in df_ind.columns and "Low" in df_ind.columns:
+            recent = df_ind.tail(20)
+            hl_range = (recent["High"] - recent["Low"]) / recent["Close"].replace(0, np.nan)
+            atr_pct = float(hl_range.mean()) if not hl_range.isna().all() else 0.05
+
+    # 停利：以10%為目標，若SlopeZ強則拉高到12%
+    tp_pct = 0.12 if slope_z >= 2.0 else (0.10 if slope_z >= 1.0 else 0.08)
+    tp = round(close * (1 + tp_pct), 2)
+
+    # 停損：2倍ATR，最低3%，最高8%
+    sl_pct = min(max(atr_pct * 2.0, 0.03), 0.08)
+    sl = round(close * (1 - sl_pct), 2)
+
+    return {
+        "prob10": round(prob10, 1),
+        "tp": tp,
+        "sl": sl,
+        "tp_pct": round(tp_pct * 100, 1),
+        "sl_pct": round(sl_pct * 100, 1),
+    }
+
+
+# ===========================================================================
+# [新增3] 取得條件滿足日期（訊號觸發日期）
+# ===========================================================================
+def get_signal_date(dec: dict, df_ind) -> str:
+    """
+    取得做多條件滿足的最近日期。
+    優先從 decision 的 date 欄位取，
+    若無則從 indicator_df 取最後一筆有效日期。
+    """
+    date_str = dec.get("date", "")
+    if date_str:
+        return str(date_str)[:10]
+
+    if df_ind is not None and not df_ind.empty:
+        try:
+            last_idx = df_ind.index[-1]
+            if hasattr(last_idx, 'strftime'):
+                return last_idx.strftime("%Y-%m-%d")
+            return str(last_idx)[:10]
+        except Exception:
+            pass
+    return "—"
 
 
 # ===========================================================================
@@ -528,6 +566,8 @@ def init_session():
         "market_sentiment_tw": None,
         "market_sentiment_us": None,
         "ai_summary": "",
+        "stock_ai_result": "",       # [新增1]
+        "stock_ai_query": "",        # [新增1]
         "data_health": {},
         "all_warnings": [],
         "selected_stock": None,
@@ -595,7 +635,7 @@ def get_date_range(target_date_str: str, lookback: int = LOOKBACK_DAYS):
 
 
 # ===========================================================================
-# [變更4] Gemini AI — 深度版 Prompt，只從做多標的中選股，強化分析深度
+# Gemini AI
 # ===========================================================================
 def call_gemini(prompt: str, api_key: str) -> str:
     if not api_key:
@@ -617,13 +657,7 @@ def call_gemini(prompt: str, api_key: str) -> str:
 
 def build_gemini_prompt(scan_results: dict, market_sentiment: dict,
                         market: str = "TW") -> str:
-    """
-    [變更4] 深度版 Prompt：
-    - 只從「做多方向」標的中選取候選
-    - 對每檔提供完整多維度數據
-    - 要求深入分析，不限字數，涵蓋技術面、資金面、勝率統計、風險控制
-    """
-    # ── 只取做多方向的標的 ──
+    """大盤 + 做多候選深度分析 Prompt"""
     bull_candidates = []
     final_flag_syms = []
 
@@ -633,7 +667,6 @@ def build_gemini_prompt(scan_results: dict, market_sentiment: dict,
         s2  = res.get("stage2", {})
         df_ind = res.get("indicator_df")
 
-        # 只要做多方向
         if dec.get("direction") != "做多":
             continue
 
@@ -658,6 +691,8 @@ def build_gemini_prompt(scan_results: dict, market_sentiment: dict,
         t_str  = f"{t_stat:.2f}" if t_stat is not None else "N/A"
         path   = translate_path(str(s2.get("path", "N/A")))
 
+        upside = calc_upside_stats(dec, df_ind, pat)
+
         bull_candidates.append({
             "sym": sym,
             "close": dec.get("close", 0),
@@ -681,15 +716,16 @@ def build_gemini_prompt(scan_results: dict, market_sentiment: dict,
             "s1_pass": s1.get("pass", False),
             "score": dec.get("score", 0),
             "signal_level": dec.get("signal_level", ""),
+            "prob10": upside.get("prob10"),
+            "tp": upside.get("tp"),
+            "sl": upside.get("sl"),
+            "signal_date": get_signal_date(dec, df_ind),
         })
 
-    # 排序：最終候選優先，再按勝率與Slope Z
     bull_candidates.sort(
         key=lambda x: (int(x["is_final"]), x["best_win10"], x["slope_z"]),
         reverse=True
     )
-
-    # 最多送前20檔，避免token爆炸
     top_candidates = bull_candidates[:20]
 
     label   = market_sentiment.get("label", "不明") if market_sentiment else "不明"
@@ -701,18 +737,21 @@ def build_gemini_prompt(scan_results: dict, market_sentiment: dict,
 
     mkt_label = "台股" if market == "TW" else "美股"
 
-    # 構建詳細候選表
     candidate_lines = []
     for c in top_candidates:
         final_marker = "⭐最終候選" if c["is_final"] else ""
+        prob_str = f"{c['prob10']}%" if c['prob10'] else "N/A"
+        tp_str   = f"{c['tp']}" if c['tp'] else "N/A"
+        sl_str   = f"{c['sl']}" if c['sl'] else "N/A"
         line = (
-            f"【{c['sym']}】{final_marker}\n"
+            f"【{c['sym']}】{final_marker} 訊號日:{c['signal_date']}\n"
             f"  現價:{c['close']:.2f} | 操作:{c['action']} {c['signal_level']}\n"
             f"  PVO:{c['pvo']:+.2f}({c['pvo_status']}) | VRI:{c['vri']:.1f}({c['vri_status']})\n"
             f"  Slope:{c['slope']:+.3f}% | SlopeZ:{c['slope_z']:+.2f} | Score:{c['score']}\n"
             f"  PVO波動率:{c['pvo_ratio']:.0%} | VRI波動率:{c['vri_ratio']:.0%}\n"
             f"  高勝率型態:{c['pat_codes']}({c['pat_desc']}) | 最高勝率10%:{c['best_win10']}%\n"
             f"  EV期望值:{c['ev']} | T值:{c['t_stat']} | 路徑:{c['path']}\n"
+            f"  推算上漲10%機率:{prob_str} | 停利:{tp_str} | 停損:{sl_str}\n"
             f"  投信10日:{c['trust']} | Stage1:{'✅' if c['s1_pass'] else '❌'}"
         )
         candidate_lines.append(line)
@@ -740,17 +779,17 @@ def build_gemini_prompt(scan_results: dict, market_sentiment: dict,
 - PVO: 量能動能指標（>10主力點火, 0~10資金流入, <0資金撤退）
 - VRI: 資金強度指標（>90擁擠過熱, 40~75健康區間, <40情緒整理）
 - SlopeZ: 標準化趨勢強度（>1.5強勢, >2.0極強）
-- PVO/VRI波動率: 近20日有效天數佔比（>60%代表持續性強）
 - 三大型態: A=資金流入+整理+強買(52.6%), B=點火+過熱+強買(52.4%), C=VRI過熱+強買(59.0%)
 - EV期望值: 基於歷史回測的期望報酬率
 - T值: 統計顯著性（>2.0具顯著性）
+- 推算上漲10%機率: 基於型態勝率+SlopeZ+VRI/PVO綜合推算
 
 ═══════════════════════════════════════
-【分析任務】請以專業分析師角度完成以下分析：
+【分析任務】
 ═══════════════════════════════════════
 
 **一、大盤風險評估**（200字以上）
-- 當前市場結構判讀：動能、趨勢、情緒三維分析
+- 當前市場結構：動能、趨勢、情緒三維分析
 - 5日與20日斜率背離或共振的含義
 - 熊/牛/震蕩機率對今日操作的影響
 - 適合的持倉水位建議（含理由）
@@ -758,21 +797,124 @@ def build_gemini_prompt(scan_results: dict, market_sentiment: dict,
 **二、最終候選精選**（從⭐最終候選中選出1~3檔，每檔200字以上）
 對每一檔請分析：
 1. 技術面研判：Slope Z趨勢強度、是否突破關鍵位
-2. 資金面研判：PVO狀態解讀、投信籌碼動向（如有）
-3. 統計優勢：命中型態解說、歷史勝率意義、EV期望值判讀、T值顯著性
-4. 波動持續性：PVO波動率與VRI波動率代表的能量穩定度
-5. 操作建議：進場時機、停損邏輯、目標區間
+2. 資金面研判：PVO狀態解讀、投信籌碼動向
+3. 統計優勢：命中型態、歷史勝率、EV期望值、T值顯著性
+4. 波動持續性：PVO/VRI波動率代表的能量穩定度
+5. 推算上漲10%機率解讀：為何是這個數字、信心區間
+6. 操作建議：停利/停損邏輯、進場時機
 
 **三、風險提示**（100-150字）
 - 今日主要風險因子（指標面）
-- 需要迴避的情境描述
+- 需要迴避的情境
 
-
-**格式要求**：條列與段落並用，數字說話，每個論點需引用具體指標數值，禁止泛泛而談。"""
+**格式要求**：條列與段落並用，數字說話，每個論點需引用具體指標數值。"""
 
 
 # ===========================================================================
-# 掃描核心（[變更2] 移除 Alpha Seeds 的實際使用，stage2 仍呼叫但結果不影響最終決策）
+# [新增1] 個股 Gemini 分析 Prompt
+# ===========================================================================
+def build_stock_gemini_prompt(sym: str, res: dict, market_sentiment: dict, market: str) -> str:
+    """針對單一個股的深度 Gemini 分析 Prompt，以大盤為分析架構主軸"""
+    dec    = res.get("decision", {})
+    s1     = res.get("stage1", {})
+    s2     = res.get("stage2", {})
+    df_ind = res.get("indicator_df")
+    trust  = res.get("trust", {})
+
+    pat       = classify_pattern(dec)
+    pat_codes = "+".join([p["code"] for p in pat["patterns"]]) if pat["patterns"] else "無"
+    pat_desc  = " | ".join([p["desc"] for p in pat["patterns"]]) if pat["patterns"] else "無型態"
+    pvo_ratio = calc_pvo_ratio(df_ind)
+    vri_ratio = calc_vri_ratio(df_ind)
+    upside    = calc_upside_stats(dec, df_ind, pat)
+    is_final  = is_final_candidate(dec, df_ind)
+    signal_dt = get_signal_date(dec, df_ind)
+
+    ev_val = s2.get("ev", None)
+    ev_str = f"{ev_val:+.2f}%" if isinstance(ev_val, (int, float)) else "N/A"
+    t_stat = s2.get("t_stat", None)
+    t_str  = f"{t_stat:.2f}" if t_stat is not None else "N/A"
+    path   = translate_path(str(s2.get("path", "N/A")))
+    trust_net = trust.get("trust_net_10d", None)
+    trust_str = f"{trust_net:+,.0f}張" if trust_net is not None else "N/A"
+
+    # 大盤資訊
+    label   = market_sentiment.get("label", "不明") if market_sentiment else "不明"
+    slope5  = market_sentiment.get("slope_5d", 0) if market_sentiment else 0
+    slope20 = market_sentiment.get("slope_20d", 0) if market_sentiment else 0
+    bear_p  = market_sentiment.get("bear", 33) if market_sentiment else 33
+    bull_p  = market_sentiment.get("bull", 33) if market_sentiment else 33
+    neu_p   = market_sentiment.get("neutral", 34) if market_sentiment else 34
+    mkt_label = "台股" if market == "TW" else "美股"
+
+    prob_str = f"{upside.get('prob10')}%" if upside.get('prob10') else "N/A"
+    tp_str   = f"{upside.get('tp')}" if upside.get('tp') else "N/A"
+    sl_str   = f"{upside.get('sl')}" if upside.get('sl') else "N/A"
+    tp_pct   = f"{upside.get('tp_pct')}%" if upside.get('tp_pct') else "N/A"
+    sl_pct   = f"{upside.get('sl_pct')}%" if upside.get('sl_pct') else "N/A"
+
+    return f"""你是一位資深量化交易分析師，請以「大盤環境為主軸」分析個股 {sym} 的投資機會。
+
+═══════════════════════════════════════
+【大盤環境（分析主軸）】{mkt_label}
+═══════════════════════════════════════
+大盤情緒: {label}
+熊市機率: {bear_p}% | 震盪機率: {neu_p}% | 牛市機率: {bull_p}%
+5日動能斜率: {slope5:+.4f} | 20日趨勢斜率: {slope20:+.4f}
+
+═══════════════════════════════════════
+【個股數據】{sym}
+═══════════════════════════════════════
+訊號觸發日: {signal_dt}
+現價: {dec.get('close', 0):.2f} | 方向: {dec.get('direction','—')} | 操作: {dec.get('action','—')} {dec.get('signal_level','')}
+PVO: {dec.get('pvo', 0):+.2f} ({dec.get('pvo_status','')}) | VRI: {dec.get('vri', 0):.1f} ({dec.get('vri_status','')})
+Slope: {dec.get('slope', 0):+.3f}% | SlopeZ: {dec.get('slope_z', 0):+.2f} | Score: {dec.get('score', 0)}
+PVO波動率: {pvo_ratio:.0%} | VRI波動率: {vri_ratio:.0%}
+高勝率型態: {pat_codes} ({pat_desc})
+最高勝率10%: {pat.get('best_win10', 0):.1f}%
+EV期望值: {ev_str} | T值: {t_str} | 路徑: {path}
+投信10日: {trust_str} | Stage1: {'✅通過' if s1.get('pass') else '❌未通過'}
+最終候選: {'⭐是' if is_final else '否'}
+推算上漲10%機率: {prob_str}
+停利目標: {tp_str} (+{tp_pct}) | 停損: {sl_str} (-{sl_pct})
+
+═══════════════════════════════════════
+【分析要求】請完成以下分析（不限字數，越詳細越好）：
+═══════════════════════════════════════
+
+**一、大盤環境對 {sym} 的影響**
+- 當前大盤情緒（{label}）對此個股的利弊分析
+- 5日/20日斜率與個股走勢的共振或背離
+- 在此大盤條件下操作 {sym} 的勝算評估
+
+**二、個股技術與資金分析**
+- PVO、VRI 指標當前狀態深度解讀
+- SlopeZ={dec.get('slope_z', 0):+.2f} 的趨勢強度含義
+- 命中型態（{pat_codes}）的歷史統計意義與操作含義
+- PVO波動率{pvo_ratio:.0%}、VRI波動率{vri_ratio:.0%}代表的持續性判斷
+- 投信籌碼變化含義（若有）
+
+**三、統計優勢評估**
+- EV期望值 {ev_str} 解讀（與市場平均比較）
+- T值 {t_str} 的統計顯著性判斷
+- 推算上漲10%機率 {prob_str} 的依據與合理性
+
+**四、操作策略建議**
+- 進場時機建議（何時入場、何種條件確認）
+- 停利目標 {tp_str} 的合理性分析（上方壓力區）
+- 停損設定 {sl_str} 的合理性分析（下方支撐區）
+- 資金配置建議（相對於大盤風險的倉位）
+- 持有天數預估（短線/中線）
+
+**五、風險警示**
+- 此股目前最大的指標面風險
+- 若大盤轉弱，此股的應對策略
+
+**格式要求**：每個論點必須引用具體數字，禁止泛泛而談，分析需專業且可操作。"""
+
+
+# ===========================================================================
+# 掃描核心
 # ===========================================================================
 def run_scan(watchlist: list, target_date: str, market_type: str, progress_bar=None):
     start_str, end_str = get_date_range(target_date)
@@ -789,8 +931,6 @@ def run_scan(watchlist: list, target_date: str, market_type: str, progress_bar=N
     elif bm_df is not None:
         st.session_state.benchmark_us_df = bm_df
         st.session_state.market_sentiment_us = get_market_sentiment(bm_df)
-
-    bm_close = bm_df['Close'] if bm_df is not None else None
 
     if market_type == "TW" and _ENV_FINMIND_TOKEN:
         yahoo_syms = []
@@ -818,7 +958,6 @@ def run_scan(watchlist: list, target_date: str, market_type: str, progress_bar=N
         df = res["indicator_df"]
         decision = get_decision(df, market=market_type)
         s1 = stage1_energy_filter(df)
-        # [變更2] stage2 仍保留呼叫（供 EV/T值/路徑 顯示用），但不再作為最終候選條件
         s2 = stage2_path_filter(sym, s1, ALPHA_SEEDS_PATH)
 
         trust_info = {"trust_net_10d": None, "trust_df": None}
@@ -909,12 +1048,6 @@ def render_market_bar(sentiment: dict, market: str):
     """, unsafe_allow_html=True)
 
 
-def get_card_class(direction: str) -> str:
-    if direction == "做多": return "bullish"
-    if direction == "做空": return "bearish"
-    return ""
-
-
 def get_badge(direction: str) -> str:
     _b = "display:inline-block;padding:3px 10px;border-radius:6px;font-size:0.75rem;font-weight:700;"
     if direction == "做多":
@@ -943,7 +1076,7 @@ def render_pattern_badges(patterns: list) -> str:
 
 
 def render_stock_card(sym: str, res: dict, show_final_badge: bool = False):
-    """渲染股票卡片（[變更3] 補充 EV期望值、T值、型態說明顯示）"""
+    """渲染股票卡片 — 含訊號日期、停利停損、上漲機率"""
     if res.get("error"):
         st.markdown(f"""
         <div style="background:#fff5f5;border:1px solid #fca5a5;border-left:4px solid #dc2626;
@@ -980,7 +1113,6 @@ def render_stock_card(sym: str, res: dict, show_final_badge: bool = False):
     s2_pass    = "✅" if s2.get("pass") else "❌"
     health_icon= "✅" if health.get("pass") else "⚠️"
 
-    # [變更3] EV、T值、型態說明 強化顯示
     ev_raw  = s2.get("ev", None)
     t_stat  = s2.get("t_stat", None)
     path    = translate_path(str(s2.get("path", "---")))
@@ -989,7 +1121,6 @@ def render_stock_card(sym: str, res: dict, show_final_badge: bool = False):
     t_str   = f"{t_stat:.2f}" if t_stat is not None else "N/A"
     t_sig   = "✅顯著" if (t_stat is not None and abs(t_stat) >= 2.0) else ("⚠️" if t_stat is not None else "N/A")
 
-    # 型態說明（每個型態的desc）
     pat_desc_list = [p["desc"] for p in pat["patterns"]] if pat["patterns"] else []
     pat_desc_html = " ｜ ".join(pat_desc_list) if pat_desc_list else "無型態"
 
@@ -1000,10 +1131,31 @@ def render_stock_card(sym: str, res: dict, show_final_badge: bool = False):
     else:
         trust_label = ""
 
-    # [變更1] 最終候選標記：改用新條件
     is_final = is_final_candidate(dec, df_ind)
 
-    card_extra = "final-pick" if (show_final_badge and is_final) else get_card_class(direction)
+    # [新增3] 訊號日期
+    signal_dt = get_signal_date(dec, df_ind)
+
+    # [新增2] 停利停損機率
+    upside = calc_upside_stats(dec, df_ind, pat)
+    prob10 = upside.get("prob10")
+    tp_val = upside.get("tp")
+    sl_val = upside.get("sl")
+    tp_pct = upside.get("tp_pct")
+    sl_pct = upside.get("sl_pct")
+    prob_str = f"{prob10}%" if prob10 else "N/A"
+    tp_str_d = f"{tp_val:.2f}" if tp_val else "N/A"
+    sl_str_d = f"{sl_val:.2f}" if sl_val else "N/A"
+
+    if show_final_badge and is_final:
+        _border_color = "#1a56db"; _bg = "linear-gradient(135deg,#eff6ff,#ffffff)"
+    elif direction == "做多":
+        _border_color = "#059669"; _bg = "#ffffff"
+    elif direction == "做空":
+        _border_color = "#dc2626"; _bg = "#ffffff"
+    else:
+        _border_color = "#0891b2"; _bg = "#ffffff"
+
     badge      = get_badge(direction)
     pattern_html = render_pattern_badges(pat["patterns"])
 
@@ -1012,6 +1164,7 @@ def render_stock_card(sym: str, res: dict, show_final_badge: bool = False):
     slope_color= "#059669" if slope > 0 else "#dc2626"
     ev_color   = "#059669" if (isinstance(ev_raw, (int, float)) and ev_raw > 3) else "#d97706"
     t_color    = "#059669" if (t_stat is not None and abs(t_stat) >= 2.0) else "#d97706"
+    prob_color = "#059669" if (prob10 and prob10 >= 50) else ("#d97706" if (prob10 and prob10 >= 35) else "#dc2626")
     mkt_tag    = "🇹🇼" if market == "TW" else "🇺🇸"
 
     vri_ratio = calc_vri_ratio(df_ind)
@@ -1031,16 +1184,6 @@ def render_stock_card(sym: str, res: dict, show_final_badge: bool = False):
     if show_final_badge and is_final:
         final_badge_html = '<span style="display:inline-block;padding:3px 10px;border-radius:6px;font-size:0.75rem;font-weight:700;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;">⭐ 最終決策候選</span>'
 
-    trust_section = f"&nbsp;|&nbsp; 🏦 {trust_label}" if trust_label else ""
-
-    if show_final_badge and is_final:
-        _border_color = "#1a56db"; _bg = "linear-gradient(135deg,#eff6ff,#ffffff)"
-    elif direction == "做多":
-        _border_color = "#059669"; _bg = "#ffffff"
-    elif direction == "做空":
-        _border_color = "#dc2626"; _bg = "#ffffff"
-    else:
-        _border_color = "#0891b2"; _bg = "#ffffff"
     _row = "display:flex;gap:16px;flex-wrap:wrap;margin-top:5px;"
     _lbl = "font-size:0.8rem;color:#64748b;"
 
@@ -1056,9 +1199,15 @@ def render_stock_card(sym: str, res: dict, show_final_badge: bool = False):
         </span>
         <span>{badge} {final_badge_html}</span>
       </div>
+      <!-- [新增3] 訊號觸發日期 -->
+      <div style="margin-bottom:4px;">
+        <span style="display:inline-block;padding:2px 10px;border-radius:6px;font-size:0.75rem;font-weight:700;background:#fef9c3;color:#713f12;border:1px solid #fde047;">
+          📅 條件滿足日期: {signal_dt}
+        </span>
+      </div>
       <!-- 高勝率型態徽章 -->
       {pattern_html}
-      <!-- [變更3] 型態說明文字 -->
+      <!-- 型態說明 -->
       <div style="font-size:0.8rem;color:#7c3aed;font-style:italic;margin:2px 0 6px 0;">
         📝 型態說明: {pat_desc_s}
       </div>
@@ -1080,24 +1229,38 @@ def render_stock_card(sym: str, res: dict, show_final_badge: bool = False):
       <!-- 波動率 -->
       <div style="{_row}">
         <span style="{_lbl}">VRI波動率:&nbsp;<b style="color:{vri_ratio_color};">{vri_ratio:.0%}</b>
-            <small style="color:#94a3b8;">（20日&gt;40天/20，&gt;60%持續性強）</small></span>
+            <small style="color:#94a3b8;">（&gt;60%持續性強）</small></span>
         <span style="{_lbl}">PVO波動率:&nbsp;<b style="color:{pvo_ratio_color};">{pvo_ratio:.0%}</b>
-            <small style="color:#94a3b8;">（20日&gt;0天/20，&gt;60%持續性強）</small></span>
+            <small style="color:#94a3b8;">（&gt;60%持續性強）</small></span>
       </div>
-      <!-- [變更3] EV期望值、T值強化顯示 -->
+      <!-- EV、T值 -->
       <div style="{_row}">
         <span style="{_lbl}">
           💰 EV期望值:&nbsp;<b style="color:{ev_color};font-size:0.9rem;">{ev_str}</b>
-          <small style="color:#94a3b8;margin-left:4px;">（歷史回測期望報酬）</small>
         </span>
         <span style="{_lbl}">
           📊 T值:&nbsp;<b style="color:{t_color};">{t_str}</b>
           <span style="color:{t_color};font-size:0.75rem;margin-left:2px;">{t_sig}</span>
-          <small style="color:#94a3b8;margin-left:4px;">（≥2.0具統計顯著性）</small>
         </span>
       </div>
+      <!-- [新增2] 上漲機率 + 停利停損 -->
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 12px;margin-top:6px;">
+        <div style="{_row}">
+          <span style="{_lbl}">
+            🎯 上漲10%機率:&nbsp;<b style="color:{prob_color};font-size:0.95rem;">{prob_str}</b>
+          </span>
+          <span style="{_lbl}">
+            🟢 停利目標:&nbsp;<b style="color:#059669;font-size:0.9rem;">{tp_str_d}</b>
+            <small style="color:#94a3b8;">(+{tp_pct if tp_pct else '—'}%)</small>
+          </span>
+          <span style="{_lbl}">
+            🔴 停損價位:&nbsp;<b style="color:#dc2626;font-size:0.9rem;">{sl_str_d}</b>
+            <small style="color:#94a3b8;">(-{sl_pct if sl_pct else '—'}%)</small>
+          </span>
+        </div>
+      </div>
       <!-- Stage / Health / Path -->
-      <div style="{_row}">
+      <div style="{_row};margin-top:6px;">
         <span style="{_lbl}">S1:&nbsp;{s1_pass}</span>
         <span style="{_lbl}">路徑:&nbsp;{path}</span>
         <span style="{_lbl}">健康:&nbsp;{health_icon}</span>
@@ -1210,7 +1373,7 @@ def render_health_panel():
 
 
 # ===========================================================================
-# 側欄（[變更2] 移除 Alpha Seeds 上傳功能）
+# 側欄
 # ===========================================================================
 def render_sidebar():
     with st.sidebar:
@@ -1275,7 +1438,7 @@ def render_sidebar():
                 st.caption("未設定 → 使用規則引擎模式")
 
         st.markdown("---")
-        st.caption("© 2026 資源法 AI 戰情室 v2.2")
+        st.caption("© 2026 資源法 AI 戰情室 v2.3")
 
 
 # ===========================================================================
@@ -1310,9 +1473,10 @@ def main():
             pb.empty()
         st.rerun()
 
+    # ── 大盤 Gemini 深度分析區 ──
     ai_col1, ai_col2 = st.columns([1, 4])
     with ai_col1:
-        ai_btn = st.button("🤖 Gemini 深度分析", use_container_width=True)
+        ai_btn = st.button("🤖 Gemini 深度分析（大盤）", use_container_width=True)
     with ai_col2:
         if st.session_state.ai_summary:
             import html as _html
@@ -1328,10 +1492,102 @@ def main():
             sent   = (st.session_state.market_sentiment_tw if market == "TW"
                       else st.session_state.market_sentiment_us)
             prompt = build_gemini_prompt(st.session_state.scan_results, sent, market)
-            with st.spinner("🤖 Gemma 4 31B 深度分析中（請稍候）..."):
+            with st.spinner("🤖 Gemma 深度分析中（請稍候）..."):
                 summary = call_gemini(prompt, st.session_state.gemini_api_key)
             st.session_state.ai_summary = summary
             st.rerun()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # [新增1] 個股 Gemini 分析區（大盤 Gemini 按鈕下方）
+    # ═══════════════════════════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown("### 🔍 個股 Gemini 深度分析")
+    st.markdown(
+        "<small style='color:#64748b;'>以大盤環境為分析主軸，對單一個股進行深度量化解讀。"
+        "若個股不在掃描名單內，將顯示「沒有資料」。</small>",
+        unsafe_allow_html=True
+    )
+
+    stock_col1, stock_col2, stock_col3 = st.columns([2, 1, 3])
+    with stock_col1:
+        stock_query = st.text_input(
+            "輸入個股代號",
+            value=st.session_state.stock_ai_query,
+            placeholder="例：2330 或 NVDA",
+            label_visibility="collapsed"
+        )
+    with stock_col2:
+        stock_ai_btn = st.button("🔬 個股分析", use_container_width=True)
+    with stock_col3:
+        st.markdown(
+            "<span style='color:#64748b;font-size:0.82rem;'>📌 輸入代號後點擊「個股分析」，"
+            "系統將以大盤環境為主軸進行深度分析</span>",
+            unsafe_allow_html=True
+        )
+
+    if stock_ai_btn and stock_query:
+        query_sym = stock_query.strip().upper()
+        st.session_state.stock_ai_query = query_sym
+
+        # 在掃描結果中尋找（含模糊比對：去掉 .TW/.TWO 後綴）
+        found_key = None
+        results_now = st.session_state.scan_results
+
+        if query_sym in results_now:
+            found_key = query_sym
+        else:
+            # 模糊比對
+            for k in results_now.keys():
+                k_clean = k.replace(".TW", "").replace(".TWO", "").upper()
+                q_clean = query_sym.replace(".TW", "").replace(".TWO", "").upper()
+                if k_clean == q_clean:
+                    found_key = k
+                    break
+
+        if not results_now:
+            st.warning("⚠️ 請先執行全盤掃描，才能進行個股分析。")
+        elif found_key is None:
+            st.markdown(
+                f"""<div style="background:#fff7ed;border:1px solid #fdba74;border-left:4px solid #f97316;
+                     border-radius:10px;padding:14px 18px;margin:8px 0;">
+                  <b style="color:#ea580c;">🚫 沒有資料</b>
+                  <div style="color:#78350f;margin-top:4px;font-size:0.9rem;">
+                    「{query_sym}」不在目前的掃描名單內。<br>
+                    請將該代號加入側欄的觀察名單並重新掃描，或確認代號格式正確（台股請輸入純數字代號，美股請輸入英文代號）。
+                  </div>
+                </div>""",
+                unsafe_allow_html=True
+            )
+            st.session_state.stock_ai_result = ""
+        else:
+            res = results_now[found_key]
+            if res.get("error"):
+                st.error(f"「{found_key}」數據異常：{res.get('error')}")
+                st.session_state.stock_ai_result = ""
+            else:
+                market = st.session_state.active_market
+                sent   = (st.session_state.market_sentiment_tw if market == "TW"
+                          else st.session_state.market_sentiment_us)
+                prompt = build_stock_gemini_prompt(found_key, res, sent, market)
+                with st.spinner(f"🤖 正在對 {found_key} 進行深度分析（請稍候）..."):
+                    result = call_gemini(prompt, st.session_state.gemini_api_key)
+                st.session_state.stock_ai_result = result
+                st.session_state.stock_ai_query  = found_key
+
+    # 顯示個股分析結果
+    if st.session_state.stock_ai_result:
+        import html as _html2
+        _safe2 = _html2.escape(st.session_state.stock_ai_result).replace('\n', '<br>')
+        query_label = st.session_state.stock_ai_query or "個股"
+        st.markdown(
+            f"""<div class="stock-ai-box">
+              <div style="font-weight:800;color:#059669;margin-bottom:10px;font-size:1.05rem;">
+                🔬 {query_label} 個股深度分析報告
+              </div>
+              {_safe2}
+            </div>""",
+            unsafe_allow_html=True
+        )
 
     st.markdown("---")
 
@@ -1360,8 +1616,11 @@ def main():
                     res = results[selected]
                     dec = res.get("decision", {})
                     s2  = res.get("stage2", {})
-                    # [變更3] Tab1 metrics 補充 EV 與 T值
-                    col1, col2, col3, col4, col5, col6 = st.columns(6)
+                    df_ind_t1 = res.get("indicator_df")
+                    pat_t1 = classify_pattern(dec)
+                    upside_t1 = calc_upside_stats(dec, df_ind_t1, pat_t1)
+
+                    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
                     col1.metric("現價", f"{dec.get('close',0):,.2f}")
                     col2.metric("PVO", f"{dec.get('pvo',0):+.2f}",
                                 delta="↑" if dec.get("pvo", 0) > 0 else "↓")
@@ -1374,9 +1633,26 @@ def main():
                     col6.metric("T 值",
                                 f"{t_val:.2f}" if t_val is not None else "N/A",
                                 delta="顯著✅" if (t_val is not None and abs(t_val) >= 2.0) else None)
+                    prob_t1 = upside_t1.get("prob10")
+                    col7.metric("上漲10%機率",
+                                f"{prob_t1}%" if prob_t1 else "N/A")
+
+                    # 停利停損 metrics
+                    col_tp, col_sl, _ = st.columns([1, 1, 2])
+                    tp_t1 = upside_t1.get("tp")
+                    sl_t1 = upside_t1.get("sl")
+                    col_tp.metric("🟢 停利目標",
+                                  f"{tp_t1:.2f}" if tp_t1 else "N/A",
+                                  delta=f"+{upside_t1.get('tp_pct')}%" if upside_t1.get('tp_pct') else None)
+                    col_sl.metric("🔴 停損價位",
+                                  f"{sl_t1:.2f}" if sl_t1 else "N/A",
+                                  delta=f"-{upside_t1.get('sl_pct')}%" if upside_t1.get('sl_pct') else None,
+                                  delta_color="inverse")
 
     # ================================================================
-    # Tab 2: 數據與排名（[變更3] 補充 EV、T值、型態說明 欄位）
+    # Tab 2: 數據與排名
+    # [新增2] 顯示所有個股 EV/T值 + 上漲10%機率/停利/停損
+    # [新增3] 顯示條件滿足日期
     # ================================================================
     with tab2:
         if not results:
@@ -1387,12 +1663,13 @@ def main():
             <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:12px 18px;margin-bottom:16px;">
             <b style="color:#0369a1;">📊 高勝率型態識別</b>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
-                <span style="{_pt}background:#d1fae5;color:#065f46;border:1px solid #34d399;">📈 A: 資金流入＋情緒整理＋強力買進 &nbsp;勝率10%: 52.6% / 20%: 37.6%&nbsp; 穩+爆發｜主升段最佳</span>
-                <span style="{_pt}background:#fee2e2;color:#991b1b;border:1px solid #f87171;">🔥 B: 主力點火＋擁擠過熱＋強力買進 &nbsp;勝率10%: 52.4%&nbsp; 超短線爆發最強（風險偏高）</span>
-                <span style="{_pt}background:#fef3c7;color:#92400e;border:1px solid #fbbf24;">🌡️ C: VRI擁擠過熱＋強力買進 &nbsp;勝率10%: 59.0% / 20%: 42.6%&nbsp; 最高勝率組合</span>
+                <span style="{_pt}background:#d1fae5;color:#065f46;border:1px solid #34d399;">📈 A: 資金流入＋情緒整理＋強力買進 &nbsp;勝率10%: 52.6% / 20%: 37.6%</span>
+                <span style="{_pt}background:#fee2e2;color:#991b1b;border:1px solid #f87171;">🔥 B: 主力點火＋擁擠過熱＋強力買進 &nbsp;勝率10%: 52.4%</span>
+                <span style="{_pt}background:#fef3c7;color:#92400e;border:1px solid #fbbf24;">🌡️ C: VRI擁擠過熱＋強力買進 &nbsp;勝率10%: 59.0% / 20%: 42.6%</span>
             </div>
             <div style="margin-top:8px;font-size:0.8rem;color:#0369a1;">
                 ⭐ 最終決策候選條件：命中任一型態 + PVO波動率&gt;60% + VRI波動率&gt;60%
+                ｜ 📅 條件滿足日期：做多訊號觸發當天日期
             </div>
             </div>
             """, unsafe_allow_html=True)
@@ -1402,7 +1679,7 @@ def main():
                 show_all = st.checkbox("顯示全部（含未通過）", value=False)
             with col_f2:
                 sort_by = st.selectbox("排序依據",
-                    ["最佳勝率10%", "Slope Z", "VRI", "PVO", "EV期望值", "Score"], index=0)
+                    ["最佳勝率10%", "上漲10%機率", "Slope Z", "VRI", "PVO", "EV期望值", "Score"], index=0)
             with col_f3:
                 min_vri = st.slider("VRI 最低門檻", 0, 100, 40)
 
@@ -1424,45 +1701,60 @@ def main():
                     continue
 
                 pat_codes = " + ".join([p["code"] for p in pat["patterns"]]) if pat["patterns"] else "—"
-                # [變更3] 型態說明獨立欄位
                 pat_desc_tab = " | ".join([p["desc"] for p in pat["patterns"]]) if pat["patterns"] else "—"
 
                 ev_raw_tab = s2.get("ev", None)
                 t_stat_tab = s2.get("t_stat", None)
 
-                # [變更1] 最終候選判斷用新條件
                 is_fin = is_final_candidate(dec, df_ind_tab)
+
+                # [新增2] 上漲機率/停利/停損
+                upside_tab = calc_upside_stats(dec, df_ind_tab, pat)
+                prob10_tab = upside_tab.get("prob10")
+                tp_tab     = upside_tab.get("tp")
+                sl_tab     = upside_tab.get("sl")
+                tp_pct_tab = upside_tab.get("tp_pct")
+                sl_pct_tab = upside_tab.get("sl_pct")
+
+                # [新增3] 訊號日期
+                sig_date_tab = get_signal_date(dec, df_ind_tab)
 
                 table_rows.append({
                     "代號":        sym,
                     "市場":        "🇹🇼" if res.get("market") == "TW" else "🇺🇸",
+                    "訊號日期":    sig_date_tab,          # [新增3]
                     "現價":        dec.get("close", 0),
                     "方向":        dec.get("direction", "---"),
                     "操作":        dec.get("action", "---"),
                     "最終候選":    "⭐" if is_fin else "—",
                     "高勝率型態":  pat_codes,
                     "最佳勝率10%": pat["best_win10"] if pat["best_win10"] > 0 else None,
-                    "型態說明":    pat_desc_tab,       # [變更3]
+                    "型態說明":    pat_desc_tab,
                     "PVO":         dec.get("pvo", 0),
                     "VRI":         dec.get("vri", 0),
                     "VRI波動率":   calc_vri_ratio(df_ind_tab),
                     "PVO波動率":   calc_pvo_ratio(df_ind_tab),
                     "Slope Z":     dec.get("slope_z", 0),
                     "Score":       dec.get("score", 0),
-                    "EV期望值%":   ev_raw_tab,          # [變更3]
-                    "T值":         t_stat_tab,          # [變更3]
+                    "EV期望值%":   ev_raw_tab,
+                    "T值":         t_stat_tab,
+                    "上漲10%機率": prob10_tab,            # [新增2]
+                    "停利目標":    tp_tab,                # [新增2]
+                    "停利%":       tp_pct_tab,            # [新增2]
+                    "停損價位":    sl_tab,                # [新增2]
+                    "停損%":       sl_pct_tab,            # [新增2]
                     "路徑":        translate_path(str(s2.get("path", "N/A"))),
                     "投信10日":    trust.get("trust_net_10d", None),
                     "S1":          "✅" if s1.get("pass") else "❌",
                     "健康":        "✅" if h.get("pass") else "⚠️",
                     "PVO狀態":     dec.get("pvo_status", ""),
                     "VRI狀態":     dec.get("vri_status", ""),
-                    "日期":        dec.get("date", ""),
                 })
 
             if table_rows:
                 sort_col_map = {
                     "最佳勝率10%": "最佳勝率10%",
+                    "上漲10%機率": "上漲10%機率",
                     "Slope Z": "Slope Z", "VRI": "VRI", "PVO": "PVO",
                     "EV期望值": "EV期望值%", "Score": "Score",
                 }
@@ -1487,21 +1779,45 @@ def main():
                     use_container_width=True,
                     hide_index=True,
                     column_config={
+                        "訊號日期":    st.column_config.TextColumn(
+                            help="做多條件滿足的日期（訊號觸發日）",
+                            width="small"
+                        ),
                         "現價":        st.column_config.NumberColumn(format="%.2f"),
                         "PVO":         st.column_config.NumberColumn(format="%.2f"),
                         "VRI":         st.column_config.NumberColumn(format="%.1f"),
                         "VRI波動率":   st.column_config.NumberColumn(format="%.0%", help="近20日VRI>40天數/20，>60%代表持續性強"),
                         "PVO波動率":   st.column_config.NumberColumn(format="%.0%", help="近20日PVO>0天數/20，>60%代表持續性強"),
                         "Slope Z":     st.column_config.NumberColumn(format="%.2f"),
-                        "EV期望值%":   st.column_config.NumberColumn(format="%.2f", help="歷史回測期望報酬率(%)"),   # [變更3]
-                        "T值":         st.column_config.NumberColumn(format="%.2f", help="統計顯著性，≥2.0具顯著性"),  # [變更3]
+                        "EV期望值%":   st.column_config.NumberColumn(format="%.2f", help="歷史回測期望報酬率(%)"),
+                        "T值":         st.column_config.NumberColumn(format="%.2f", help="統計顯著性，≥2.0具顯著性"),
                         "最佳勝率10%": st.column_config.NumberColumn(format="%.1f%%", help="命中型態的最高10日勝率"),
+                        "上漲10%機率": st.column_config.NumberColumn(  # [新增2]
+                            format="%.1f%%",
+                            help="基於高勝率型態+SlopeZ+VRI/PVO綜合推算的上漲10%機率"
+                        ),
+                        "停利目標":    st.column_config.NumberColumn(  # [新增2]
+                            format="%.2f",
+                            help="建議停利目標價位"
+                        ),
+                        "停利%":       st.column_config.NumberColumn(  # [新增2]
+                            format="%.1f%%",
+                            help="停利目標距現價漲幅"
+                        ),
+                        "停損價位":    st.column_config.NumberColumn(  # [新增2]
+                            format="%.2f",
+                            help="建議停損價位（基於ATR×2）"
+                        ),
+                        "停損%":       st.column_config.NumberColumn(  # [新增2]
+                            format="%.1f%%",
+                            help="停損幅度"
+                        ),
                         "投信10日":    st.column_config.NumberColumn(
                             label="投信10日(張)", format="%+,.0f",
                             help="近10個交易日投信累積買賣超（正=買超/負=賣超）"
                         ),
                         "高勝率型態":  st.column_config.TextColumn(help="A=資金流入+整理+強買 | B=點火+過熱+強買 | C=VRI過熱+強買"),
-                        "型態說明":    st.column_config.TextColumn(help="型態操作特性說明"),  # [變更3]
+                        "型態說明":    st.column_config.TextColumn(help="型態操作特性說明"),
                         "最終候選":    st.column_config.TextColumn(help="⭐=命中型態+PVO波動率>60%+VRI波動率>60%"),
                     }
                 )
@@ -1516,13 +1832,14 @@ def main():
                 st.info("無符合條件的標的，嘗試調整篩選條件")
 
     # ================================================================
-    # Tab 3: 決策戰情室（[變更1] 最終候選條件更新）
+    # Tab 3: 決策戰情室
+    # [新增3] 顯示條件滿足日期
     # ================================================================
     with tab3:
         if not results:
             st.info("請先執行掃描")
         else:
-            # ── 區塊一：最終決策候選（三大型態 + PVO波動率>0.6 + VRI波動率>0.6）──
+            # ── 最終決策候選 ──
             final_picks = [
                 (s, r) for s, r in results.items()
                 if not r.get("error")
@@ -1554,7 +1871,6 @@ def main():
                     pvo_ratio = calc_pvo_ratio(df_ind)
                     path_zh = translate_path(str(s2.get("path","N/A")))
 
-                    # [變更3] 補充 EV、T值 在最終候選摘要中
                     ev_raw = s2.get("ev", None)
                     t_raw  = s2.get("t_stat", None)
                     ev_display = f"{ev_raw:+.2f}%" if isinstance(ev_raw, (int, float)) else "N/A"
@@ -1567,12 +1883,30 @@ def main():
 
                     mkt_tag = "🇹🇼" if res.get("market") == "TW" else "🇺🇸"
 
+                    # [新增2] 上漲機率/停利/停損
+                    upside_fp = calc_upside_stats(dec, df_ind, pat)
+                    prob10_fp = upside_fp.get("prob10")
+                    tp_fp     = upside_fp.get("tp")
+                    sl_fp     = upside_fp.get("sl")
+                    tp_pct_fp = upside_fp.get("tp_pct")
+                    sl_pct_fp = upside_fp.get("sl_pct")
+                    prob_c    = "#059669" if (prob10_fp and prob10_fp >= 50) else "#d97706"
+
+                    # [新增3] 訊號日期
+                    sig_dt_fp = get_signal_date(dec, df_ind)
+
                     st.markdown(f"""
                     <div style="background:#eff6ff;border:1px solid #93c5fd;border-left:4px solid #1a56db;
                          border-radius:8px;padding:12px 16px;margin-bottom:8px;">
                         <div style="display:flex;justify-content:space-between;align-items:center;">
                             <b style="color:#1e40af;font-size:1rem;">{mkt_tag} {sym}</b>
                             <span style="display:inline-block;padding:3px 10px;border-radius:6px;font-size:0.78rem;font-weight:700;background:#fef3c7;color:#92400e;border:1px solid #fbbf24;">{win_str}</span>
+                        </div>
+                        <!-- [新增3] 訊號日期 -->
+                        <div style="margin:4px 0;">
+                          <span style="display:inline-block;padding:2px 10px;border-radius:6px;font-size:0.75rem;font-weight:700;background:#fef9c3;color:#713f12;border:1px solid #fde047;">
+                            📅 條件滿足日期: {sig_dt_fp}
+                          </span>
                         </div>
                         <div style="font-size:0.82rem;color:#475569;margin-top:4px;">{pat_labels}</div>
                         <div style="font-size:0.79rem;color:#7c3aed;font-style:italic;margin:2px 0;">📝 {pat_descs}</div>
@@ -1588,6 +1922,12 @@ def main():
                             <span>VRI波動率: <b style="color:{'#059669' if vri_ratio > 0.6 else '#d97706'}">{vri_ratio:.0%}</b></span>
                             <span>PVO波動率: <b style="color:{'#059669' if pvo_ratio > 0.6 else '#d97706'}">{pvo_ratio:.0%}</b></span>
                         </div>
+                        <!-- [新增2] 上漲機率/停利/停損 -->
+                        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:6px 12px;margin-top:6px;display:flex;gap:20px;flex-wrap:wrap;">
+                            <span style="font-size:0.83rem;">🎯 上漲10%機率: <b style="color:{prob_c}">{prob10_fp if prob10_fp else 'N/A'}%</b></span>
+                            <span style="font-size:0.83rem;">🟢 停利: <b style="color:#059669">{tp_fp if tp_fp else 'N/A'}</b> <small>(+{tp_pct_fp if tp_pct_fp else '—'}%)</small></span>
+                            <span style="font-size:0.83rem;">🔴 停損: <b style="color:#dc2626">{sl_fp if sl_fp else 'N/A'}</b> <small>(-{sl_pct_fp if sl_pct_fp else '—'}%)</small></span>
+                        </div>
                     </div>
                     """, unsafe_allow_html=True)
             else:
@@ -1595,7 +1935,7 @@ def main():
 
             st.markdown("---")
 
-            # ── 區塊二：做多訊號 ──
+            # ── 做多訊號 ──
             bull_stocks = [
                 (s, r) for s, r in results.items()
                 if not r.get("error")
@@ -1635,7 +1975,7 @@ def main():
             else:
                 st.info("目前無做多訊號通過篩選")
 
-            # ── 區塊三：做空 / 觀望 ──
+            # ── 做空 / 觀望 ──
             bear_stocks = [(s, r) for s, r in results.items()
                            if not r.get("error")
                            and r.get("decision", {}).get("direction") == "做空"]
@@ -1668,7 +2008,7 @@ def main():
                 render_kline_chart(sym, results[sym])
 
     # ================================================================
-    # Tab 4: 數據健康度（[變更2] 移除 Alpha Seeds 相關區塊）
+    # Tab 4: 數據健康度
     # ================================================================
     with tab4:
         render_health_panel()
