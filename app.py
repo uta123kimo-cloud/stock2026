@@ -251,7 +251,7 @@ h4, h5, h6 { color: var(--accent2) !important; }
     padding: 8px 16px;
     font-family: 'Share Tech Mono', monospace;
     font-size: 0.8rem;
-    color: var(--text-dim);
+    color: var(--red);
     margin-bottom: 16px;
     display: flex;
     gap: 24px;
