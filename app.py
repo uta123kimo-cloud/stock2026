@@ -360,7 +360,20 @@ button[data-baseweb="tab"][aria-selected="true"] p { color: #000000 !important; 
     color: #dc2626 !important;
     font-weight: 700 !important;
 }
+# 在第 365 行後添加以下 CSS 規則
 
+/* ─── 日期選擇器（DateInput）下拉背景修正 ─── */
+[data-testid="stDateInput"] [role="listbox"],
+[data-testid="stDateInput"] [role="option"],
+[data-testid="stDateInput"] div[role="listbox"],
+[data-baseweb="select"] [role="listbox"] {
+    background-color: #ffffff !important;
+}
+
+[data-testid="stDateInput"] [role="option"]:hover,
+[data-baseweb="select"] [role="option"]:hover {
+    background-color: #f5f5f5 !important;
+}
 /* BaseWeb Select 容器 */
 [data-baseweb="popover"] {
     background-color: #ffffff !important;
