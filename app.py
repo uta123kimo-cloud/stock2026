@@ -368,26 +368,28 @@ button[data-baseweb="tab"][aria-selected="true"] p { color: #000000 !important; 
 [data-testid="stDateInput"] div[role="listbox"],
 [data-baseweb="select"] [role="listbox"] {
     background-color: #ffffff !important;
+    color: #000000 !important;
+}
+
+[data-testid="stDateInput"] [role="option"],
+[data-baseweb="select"] [role="option"] {
+    background-color: #ffffff !important;
+    color: #000000 !important;
 }
 
 [data-testid="stDateInput"] [role="option"]:hover,
 [data-baseweb="select"] [role="option"]:hover {
     background-color: #f5f5f5 !important;
-}
-/* BaseWeb Select 容器 */
-[data-baseweb="popover"] {
-    background-color: #ffffff !important;
+    color: #000000 !important;
 }
 
-/* Selectbox 輸入框 */
-.st-g0 [role="combobox"],
-.st-au input[type="text"] {
-    background-color: #ffffff !important;
+/* 選中的日期顯示為紅色 */
+[data-testid="stDateInput"] [role="option"][aria-selected="true"],
+[data-baseweb="select"] [role="option"][aria-selected="true"] {
+    background-color: #fef2f2 !important;
     color: #dc2626 !important;
-    border: 1px solid #e2e8f0 !important;
+    font-weight: 700 !important;
 }
-
-
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg-main); }
 ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
