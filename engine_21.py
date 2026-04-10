@@ -19,19 +19,44 @@ warnings.filterwarnings('ignore')
 import os
 import pandas as pd
 from datetime import datetime
-# ... 其他原本的 import ...
 
 # ==========================================
-# 程式碼 A：讀取 GitHub 傳進來的加密金鑰
+# 程式碼 A：讀取 Token (放在最上面)
 # ==========================================
 token = os.getenv('FINMIND_TOKEN')
 
-if not token:
-    print("⚠️ 警告：找不到 FINMIND_TOKEN，可能無法抓取即時數據")
 # ==========================================
+# 程式碼 B：定義「存檔函式」 (放在 main 上面)
+# ==========================================
+def save_v12_results(df):
+    """
+    這是一個定義，放在這裡不會立刻執行。
+    只有當我們在 main 裡面呼叫它時，它才會運作。
+    """
+    if not os.path.exists('storage'):
+        os.makedirs('storage')
+    
+    current_time = datetime.now().strftime('%Y%m%d_%H%M')
+    file_path = f"storage/signals_{current_time}.parquet"
+    
+    df.to_parquet(file_path, index=False)
+    print(f"✅ 數據已成功存入: {file_path}")
 
-# 接下來是你原本抓取資料的程式碼，例如：
-# data = FinMind.data(token=token, ...)
+# ==========================================
+# 主程式入口 (MAIN)
+# ==========================================
+if __name__ == "__main__":
+    print("🚀 啟動 V12.1 核心運算...")
+    
+    # 1. 執行你的 V12.1 運算邏輯 (假設結果存成 final_df)
+    # final_df = run_v12_logic(token) 
+    
+    # 2. 運算結束後，呼叫上面的 B 函式來存檔
+    # 這裡就是真正執行「程式碼 B」的地方
+    if 'final_df' in locals():
+        save_v12_results(final_df)
+    else:
+        print("❌ 運算失敗，沒有產出數據")
 # ===========================================================================
 # 環境變數讀取（機密金鑰）
 # ===========================================================================
@@ -621,22 +646,4 @@ def get_market_sentiment(benchmark_df: pd.DataFrame) -> dict:
         "slope_5d": round(slope_5d, 3),
         "slope_20d": round(slope_20d, 3),
     }
-# ... 這裡是你運算完畢的地方 ...
 
-# ==========================================
-# 程式碼 B：將結果存成當天日期的 Parquet 檔
-# ==========================================
-# 1. 確保儲存目錄存在
-if not os.path.exists('storage'):
-    os.makedirs('storage')
-
-# 2. 產生當天日期時間 (例如: 20260410_1530)
-current_time = datetime.now().strftime('%Y%m%d_%H%M')
-filename = f"signals_{current_time}.parquet"
-file_path = os.path.join('storage', filename)
-
-# 3. 執行儲存 (假設你的結果變數名稱是 final_df)
-final_df.to_parquet(file_path, index=False)
-
-print(f"✅ V12.1 運算完成！數據已存至：{file_path}")
-# ==========================================
