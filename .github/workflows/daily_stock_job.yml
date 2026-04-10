@@ -1,0 +1,36 @@
+name: Stock Analysis Daily Job
+
+on:
+  schedule:
+    # 設定每天台股收盤後執行 (國際標準時 UTC 07:30 = 台灣時間 15:30)
+    - cron: '30 7 * * *'
+  workflow_dispatch: # 讓你可以隨時手動點擊執行
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 檢出程式碼
+        uses: actions/checkout@v3
+
+      - name: 設定 Python 環境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 安裝依賴套件
+        run: |
+          pip install -r requirements.txt
+
+      - name: 執行交易核心 V12.1
+        run: |
+          python engine_21.py
+        # 這裡會計算 PVO, VRI, Slope 等指標
+
+      - name: 儲存運算結果
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add storage/*.parquet  # 假設你的結果存在 storage
+          git commit -m "Update stock signals [$(date)]" || exit 0
+          git push
