@@ -1,36 +1,55 @@
-name: Stock Analysis Daily Job
+name: Stock Analysis v12.1 Auto-Job
 
 on:
   schedule:
-    # 設定每天台股收盤後執行 (國際標準時 UTC 07:30 = 台灣時間 15:30)
+    # 台灣時間 15:30 (UTC 07:30) 盤後定調
     - cron: '30 7 * * *'
-  workflow_dispatch: # 讓你可以隨時手動點擊執行
+    # 台灣時間 10:30 (UTC 02:00) 盤中觀察
+    - cron: '0 2 * * *'
+  workflow_dispatch: # 保留手動觸發功能
+
+# 賦予寫入權限，解決 exit code 128 錯誤
+permissions:
+  contents: write
 
 jobs:
-  build:
+  run-trading-engine:
     runs-on: ubuntu-latest
     steps:
       - name: 檢出程式碼
         uses: actions/checkout@v4
 
-      - name: 設定 Python 環境
+      - name: 設定 Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: 'pip'
 
       - name: 安裝依賴套件
         run: |
           pip install -r requirements.txt
 
       - name: 執行交易核心 V12.1
+        env:
+          # 將 Token 從 GitHub Secrets 傳入環境變數
+          STOCK_API_TOKEN: ${{ secrets.STOCK_TOKEN }}
         run: |
+          # 建立儲存目錄，避免路徑不存在導致失敗
+          mkdir -p storage
           python engine_21.py
-        # 這裡會計算 PVO, VRI, Slope 等指標
 
-      - name: 儲存運算結果
+      - name: 提交並推送動態數據檔
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add storage/*.parquet  # 假設你的結果存在 storage
-          git commit -m "Update stock signals [$(date)]" || exit 0
-          git push
+          
+          # 檢查是否有新產出的 .parquet 檔案
+          git add storage/*.parquet
+          
+          # 只有在有檔案變動時才提交，避免無效紀錄
+          if git diff --staged --quiet; then
+            echo "今日數據尚未更新或無變動"
+          else
+            git commit -m "Auto-update signals: $(date +'%Y-%m-%d %H:%M')"
+            git push
+          fi
