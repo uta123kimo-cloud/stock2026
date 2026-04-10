@@ -48,15 +48,21 @@ def save_v12_results(df):
 if __name__ == "__main__":
     print("🚀 啟動 V12.1 核心運算...")
     
-    # 1. 執行你的 V12.1 運算邏輯 (假設結果存成 final_df)
-    # final_df = run_v12_logic(token) 
-    
-    # 2. 運算結束後，呼叫上面的 B 函式來存檔
-    # 這裡就是真正執行「程式碼 B」的地方
-    if 'final_df' in locals():
-        save_v12_results(final_df)
-    else:
-        print("❌ 運算失敗，沒有產出數據")
+    # 1. 執行你的 V12.1 運算邏輯
+    # 請確保這裡的變數名稱叫 final_df，且取消前面的 # 號
+    try:
+        # 這裡填入你原本抓取資料與計算 PVO/VRI 的代碼
+        # 假設你的運算主函式叫 run_v12_logic
+        final_df = run_v12_logic(token) 
+        
+        # 2. 運算結束後，呼叫上面的 B 函式來存檔
+        if isinstance(final_df, pd.DataFrame) and not final_df.empty:
+            save_v12_results(final_df)
+        else:
+            print("❌ 運算結果為空，停止存檔")
+            
+    except Exception as e:
+        print(f"💥 核心運算發生崩潰: {e}")
 # ===========================================================================
 # 環境變數讀取（機密金鑰）
 # ===========================================================================
