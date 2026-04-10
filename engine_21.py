@@ -16,7 +16,22 @@ from datetime import datetime, timedelta
 
 logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 warnings.filterwarnings('ignore')
+import os
+import pandas as pd
+from datetime import datetime
+# ... 其他原本的 import ...
 
+# ==========================================
+# 程式碼 A：讀取 GitHub 傳進來的加密金鑰
+# ==========================================
+token = os.getenv('FINMIND_TOKEN')
+
+if not token:
+    print("⚠️ 警告：找不到 FINMIND_TOKEN，可能無法抓取即時數據")
+# ==========================================
+
+# 接下來是你原本抓取資料的程式碼，例如：
+# data = FinMind.data(token=token, ...)
 # ===========================================================================
 # 環境變數讀取（機密金鑰）
 # ===========================================================================
@@ -606,3 +621,22 @@ def get_market_sentiment(benchmark_df: pd.DataFrame) -> dict:
         "slope_5d": round(slope_5d, 3),
         "slope_20d": round(slope_20d, 3),
     }
+# ... 這裡是你運算完畢的地方 ...
+
+# ==========================================
+# 程式碼 B：將結果存成當天日期的 Parquet 檔
+# ==========================================
+# 1. 確保儲存目錄存在
+if not os.path.exists('storage'):
+    os.makedirs('storage')
+
+# 2. 產生當天日期時間 (例如: 20260410_1530)
+current_time = datetime.now().strftime('%Y%m%d_%H%M')
+filename = f"signals_{current_time}.parquet"
+file_path = os.path.join('storage', filename)
+
+# 3. 執行儲存 (假設你的結果變數名稱是 final_df)
+final_df.to_parquet(file_path, index=False)
+
+print(f"✅ V12.1 運算完成！數據已存至：{file_path}")
+# ==========================================
