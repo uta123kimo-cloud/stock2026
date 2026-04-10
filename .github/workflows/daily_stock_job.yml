@@ -6,9 +6,8 @@ on:
     - cron: '30 7 * * *'
     # 台灣時間 10:30 (UTC 02:00) 盤中觀察
     - cron: '0 2 * * *'
-  workflow_dispatch: # 保留手動觸發功能
+  workflow_dispatch: # 手動觸發按鈕
 
-# 賦予寫入權限，解決 exit code 128 錯誤
 permissions:
   contents: write
 
@@ -23,7 +22,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: 'pip'
 
       - name: 安裝依賴套件
         run: |
@@ -31,25 +29,23 @@ jobs:
 
       - name: 執行交易核心 V12.1
         env:
-          # 將 Token 從 GitHub Secrets 傳入環境變數
-          STOCK_API_TOKEN: ${{ secrets.STOCK_TOKEN }}
+          # 這裡必須對應你剛才設定的 Secret 名稱
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
         run: |
-          # 建立儲存目錄，避免路徑不存在導致失敗
-          mkdir -p storage
+          mkdir -p storage  # 強制建立資料夾
           python engine_21.py
 
-      - name: 提交並推送動態數據檔
+      - name: 提交並推送結果
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          # 檢查是否有新產出的 .parquet 檔案
-          git add storage/*.parquet
+          # 這裡改用 git add . 捕捉所有新增的日期檔名
+          git add storage/
           
-          # 只有在有檔案變動時才提交，避免無效紀錄
           if git diff --staged --quiet; then
-            echo "今日數據尚未更新或無變動"
+            echo "沒有偵測到新產出的數據檔。"
           else
-            git commit -m "Auto-update signals: $(date +'%Y-%m-%d %H:%M')"
+            git commit -m "自動更新數據: $(date +'%Y-%m-%d %H:%M')"
             git push
           fi
