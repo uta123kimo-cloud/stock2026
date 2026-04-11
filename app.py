@@ -5,18 +5,6 @@
 ║   資料來源：GitHub Raw JSON / Parquet (每日自動更新)           ║
 ╚══════════════════════════════════════════════════════════════╝
 """
-DEMO_MODE = True
-if DEMO_MODE:
-    import pandas as pd
-    import numpy as np
-
-    df = pd.DataFrame({
-        "date": pd.date_range("2024-01-01", periods=100),
-        "price": np.random.randn(100).cumsum()
-    })
-else:
-    df = load_real_data()  # 你的 V4 / V12
-
 
 import json
 import requests
@@ -37,18 +25,18 @@ except ImportError:
 # ──────────────────────────────────────────────────────────────
 # 環境設定
 # ──────────────────────────────────────────────────────────────
-
 def _get_secret(key: str, default: str = "") -> str:
     try:
-        return st.secrets.get(key, default)
+        return st.secrets[key]
     except Exception:
         return os.environ.get(key, default)
-   
+
 _ENV_GEMINI_KEY = _get_secret("GEMINI_API_KEY")
 
 # ──────────────────────────────────────────────────────────────
 # GitHub 資料源設定（修改為你的 repo）
 # ──────────────────────────────────────────────────────────────
+GITHUB_RAW = "https://raw.githubusercontent.com/{owner}/{repo}/main/storage"
 GITHUB_OWNER = _get_secret("GITHUB_OWNER", "your-username")
 GITHUB_REPO  = _get_secret("GITHUB_REPO",  "quant-storage")
 BASE_URL     = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/main/storage"
@@ -301,7 +289,7 @@ def load_json(path_suffix: str) -> dict | list | None:
     """從 GitHub 讀取 JSON 快照"""
     url = f"{BASE_URL}/{path_suffix}"
     try:
-        r = requests.get(url, timeout=3)
+        r = requests.get(url, timeout=10)
         if r.status_code == 200:
             return r.json()
         return None
@@ -677,15 +665,34 @@ def render_sidebar():
 # 載入所有資料
 # ══════════════════════════════════════════════════════════════
 def load_all_data():
+    """載入所有資料，同時回傳各來源是否為真實資料的狀態"""
     use_mock = st.session_state.use_mock
     if use_mock:
+        data_status = {"v4": False, "v12": False, "regime": False, "market": False, "hist": False}
+        st.session_state["data_status"] = data_status
         return _mock_v4(), _mock_v12(), _mock_regime(), _mock_market(), _mock_history()
 
-    v4     = load_v4_snapshot()     or _mock_v4()
-    v12    = load_v12_snapshot()    or _mock_v12()
-    regime = load_regime_snapshot() or _mock_regime()
-    market = load_market_snapshot() or _mock_market()
-    hist   = load_trade_history()   or _mock_history()
+    _v4_raw     = load_v4_snapshot()
+    _v12_raw    = load_v12_snapshot()
+    _regime_raw = load_regime_snapshot()
+    _market_raw = load_market_snapshot()
+    _hist_raw   = load_trade_history()
+
+    # 記錄哪些資料來自真實 GitHub，哪些 fallback 到 mock
+    data_status = {
+        "v4":     _v4_raw     is not None,
+        "v12":    _v12_raw    is not None,
+        "regime": _regime_raw is not None,
+        "market": _market_raw is not None,
+        "hist":   _hist_raw   is not None,
+    }
+    st.session_state["data_status"] = data_status
+
+    v4     = _v4_raw     or _mock_v4()
+    v12    = _v12_raw    or _mock_v12()
+    regime = _regime_raw or _mock_regime()
+    market = _market_raw or _mock_market()
+    hist   = _hist_raw   or _mock_history()
     return v4, v12, regime, market, hist
 
 
@@ -757,6 +764,12 @@ def render_v4_section(v4: dict):
         slz     = r.get("slope_z", 0)
         close   = r.get("close", 0)
         regime  = r.get("regime", "—")
+
+        # 安全 escape，防止資料值破壞 HTML 結構
+        import html as _html_mod
+        sym    = _html_mod.escape(str(sym))
+        signal = _html_mod.escape(str(signal))
+        regime = _html_mod.escape(str(regime))
 
         rank_css    = {1:"rank-1",2:"rank-2",3:"rank-3"}.get(rank,"rank-n")
         pvo_css     = "c-green" if pvo > 10 else ("c-cyan" if pvo > 0 else "c-red")
@@ -844,6 +857,13 @@ def render_v12_section(v12: dict):
         curr_ret = p.get("curr_ret_pct",0)
         tp1      = p.get("tp1_price","—")
         stop     = p.get("stop_price","—")
+
+        # 安全 escape，防止資料值破壞 HTML 結構
+        import html as _html_mod
+        sym     = _html_mod.escape(str(sym))
+        ev_tier = _html_mod.escape(str(ev_tier))
+        tp1     = _html_mod.escape(str(tp1))
+        stop    = _html_mod.escape(str(stop))
 
         ev_css   = "c-green" if ev>5 else ("c-cyan" if ev>3 else "c-amber")
         ret_css  = "c-green" if curr_ret>0 else "c-red"
@@ -1130,15 +1150,12 @@ def render_single_stock_panel(v4: dict, v12: dict, regime: dict):
 
     if analyze_btn and sym_input:
         sym_q = sym_input.strip().upper()
-        prompt = build_single_stock_prompt(sym_q, v4, v12, regime)  
+        prompt = build_single_stock_prompt(sym_q, v4, v12, regime)
         with st.spinner(f"🤖 分析 {sym_q} 中..."):
             result = call_gemini(prompt, st.session_state.gemini_key)
         st.session_state.single_sym    = sym_q
         st.session_state.single_result = result
-    if hasattr(st, "rerun"):
         st.rerun()
-    else:
-        st.experimental_rerun()
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1158,9 +1175,23 @@ def main():
 
     # ── 標題列 ──
     use_mock = st.session_state.use_mock
-    mode_label = "DEMO 模式" if use_mock else "LIVE 資料"
-    mode_css   = "chip-warn" if use_mock else "chip-ok"
-    gen_at     = v4.get("generated_at", "—") if v4 else "—"
+    data_status = st.session_state.get("data_status", {})
+    all_live = all(data_status.values()) if data_status else False
+
+    if use_mock:
+        mode_label = "DEMO 模式"
+        mode_css   = "chip-warn"
+        mode_badge_css = "background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.4);color:#f59e0b;"
+    elif all_live:
+        mode_label = "LIVE 資料"
+        mode_css   = "chip-ok"
+        mode_badge_css = "background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3);color:#10b981;"
+    else:
+        mode_label = "部分 DEMO"
+        mode_css   = "chip-warn"
+        mode_badge_css = "background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.4);color:#f59e0b;"
+
+    gen_at = v4.get("generated_at", "—") if v4 else "—"
 
     st.markdown(f"""
     <div class="hq-header">
@@ -1168,9 +1199,23 @@ def main():
             <div class="hq-title">⚡ 資源法 AI 戰情室 <span style="font-size:0.9rem;opacity:0.6;">v3.0</span></div>
             <div class="hq-sub">Precompute + GitHub Storage + Pure Display Layer</div>
         </div>
-        <div class="hq-badge">{mode_label}</div>
+        <div class="hq-badge" style="{mode_badge_css}">{mode_label}</div>
     </div>
     """, unsafe_allow_html=True)
+
+    # ── 資料來源警告（GitHub 未連線時顯示 fallback 提示）──
+    if not use_mock and not all_live:
+        missing = []
+        if not data_status.get("v4"):     missing.append("V4")
+        if not data_status.get("v12"):    missing.append("V12.1")
+        if not data_status.get("regime"): missing.append("Regime")
+        if not data_status.get("market"): missing.append("Market")
+        if not data_status.get("hist"):   missing.append("歷史")
+        st.warning(
+            f"⚠️ **GitHub 資料讀取失敗**：{' / '.join(missing)} 目前顯示模擬資料（Demo fallback）。\n\n"
+            f"請確認 GitHub Owner/Repo 設定，或在側欄開啟「使用模擬資料」。",
+            icon="⚠️"
+        )
 
     # ── 狀態列 ──
     bear  = (regime or {}).get("bear",  0.33)
@@ -1233,6 +1278,70 @@ def main():
             summary = call_gemini(prompt, st.session_state.gemini_key)
         st.session_state.ai_summary = summary
         st.rerun()
+
+    st.markdown("---")
+
+    # ── 首頁快速預覽：V4 TOP5 + V12 部位摘要 ──
+    prev_col1, prev_col2 = st.columns(2)
+    data_status = st.session_state.get("data_status", {})
+
+    with prev_col1:
+        v4_live = data_status.get("v4", True)
+        st.markdown(f"""
+        <div class="sec-header sec-v4" style="margin-top:0;">
+            <span style="font-size:0.95rem;font-weight:900;color:#3b82f6;">🟦 V4 TOP5 強度快覽</span>
+            <span class="sec-label">{'⚠️ Demo資料' if not v4_live else '✅ Live'}</span>
+        </div>
+        """, unsafe_allow_html=True)
+        top5 = (v4 or {}).get("top20", [])[:5]
+        if top5:
+            import html as _he
+            ph = '<table class="data-table"><thead><tr><th>#</th><th>代號</th><th>Score</th><th>操作</th><th>訊號</th></tr></thead><tbody>'
+            for r in top5:
+                rk   = r.get("rank","—")
+                sym  = _he.escape(str(r.get("symbol","—")))
+                sc   = r.get("score", 0)
+                act  = r.get("action","—")
+                sig  = _he.escape(str(r.get("signal","—")))
+                rk_css = {1:"rank-1",2:"rank-2",3:"rank-3"}.get(rk,"rank-n")
+                ph += f'<tr><td><span class="rank-badge {rk_css}">{rk}</span></td>'
+                ph += f'<td><b style="color:#e2e8f0;">{sym}</b></td>'
+                ph += f'<td><span class="mono-num">{sc:.2f}</span></td>'
+                ph += f'<td>{_action_pill(act)}</td>'
+                ph += f'<td><span class="pill pill-b" style="font-size:0.65rem;">{sig}</span></td></tr>'
+            ph += '</tbody></table>'
+            st.markdown(ph, unsafe_allow_html=True)
+        else:
+            st.info("⏳ V4 資料讀取中")
+
+    with prev_col2:
+        v12_live = data_status.get("v12", True)
+        st.markdown(f"""
+        <div class="sec-header sec-v12" style="margin-top:0;">
+            <span style="font-size:0.95rem;font-weight:900;color:#10b981;">🟩 V12.1 部位快覽</span>
+            <span class="sec-label">{'⚠️ Demo資料' if not v12_live else '✅ Live'}</span>
+        </div>
+        """, unsafe_allow_html=True)
+        positions_prev = (v12 or {}).get("positions", [])[:5]
+        if positions_prev:
+            import html as _he2
+            ph2 = '<table class="data-table"><thead><tr><th>代號</th><th>路徑</th><th>EV</th><th>操作</th><th>出場</th></tr></thead><tbody>'
+            for p in positions_prev:
+                sym  = _he2.escape(str(p.get("symbol","—")))
+                path = p.get("path","—")
+                ev   = p.get("ev",0)
+                act  = p.get("action","—")
+                exs  = p.get("exit_signal","—")
+                ev_css = "c-green" if ev>5 else ("c-cyan" if ev>3 else "c-amber")
+                ph2 += f'<tr><td><b style="color:#e2e8f0;">{sym}</b></td>'
+                ph2 += f'<td>{_path_tag(path)}</td>'
+                ph2 += f'<td><span class="mono-num {ev_css}">{ev:+.2f}%</span></td>'
+                ph2 += f'<td>{_action_pill(act)}</td>'
+                ph2 += f'<td>{_exit_pill(exs)}</td></tr>'
+            ph2 += '</tbody></table>'
+            st.markdown(ph2, unsafe_allow_html=True)
+        else:
+            st.info("⏳ V12.1 資料讀取中")
 
     st.markdown("---")
 
