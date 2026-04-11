@@ -32,9 +32,7 @@ def _get_secret(key: str, default: str = "") -> str:
         return st.secrets.get(key, default)
     except Exception:
         return os.environ.get(key, default)
-    except Exception:
-        return os.environ.get(key, default)
-
+   
 _ENV_GEMINI_KEY = _get_secret("GEMINI_API_KEY")
 
 # ──────────────────────────────────────────────────────────────
