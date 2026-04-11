@@ -1,10 +1,6 @@
 name: 資源法 Daily Compute
 
 on:
-  # ─────────────────────────────────────────────────────────
-  # 精準 CRON 排程（UTC 時間 = 台灣時間 - 8 小時）
-  # 週一至週五（1-5）台股交易日運行
-  # ─────────────────────────────────────────────────────────
   workflow_dispatch:
 
   schedule:
@@ -30,7 +26,7 @@ jobs:
 
     env:
       TZ: Asia/Taipei
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true   # ✅ 修正：支援 Node.js 24，避免 2026/06 強制遷移警告
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       # ── 1. Checkout 程式碼 ──────────────────────────────────
@@ -48,11 +44,18 @@ jobs:
           cache: pip
 
       # ── 3. 安裝依賴 ────────────────────────────────────────
-      # ✅ 修正：合併為單一 pip install 指令，pandas-ta 直接從 GitHub 安裝
-      #         避免分兩段安裝造成 PyPI 版本解析錯誤
+      # ✅ 修正1：git config insteadOf 注入 GITHUB_TOKEN，解決
+      #           "No such device or address" clone 失敗問題
+      # ✅ 修正2：合併為單一 pip install 指令，pandas-ta 從 GitHub 安裝
       - name: Install Dependencies
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           pip install --upgrade pip
+
+          # 全域替換 github.com URL，讓 git clone 帶入認證 token
+          git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+
           pip install \
             "yfinance==0.2.48" \
             "pandas==2.2.3" \
