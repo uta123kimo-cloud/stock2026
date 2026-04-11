@@ -30,10 +30,10 @@ jobs:
 
     env:
       TZ: Asia/Taipei
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true   # ✅ 修正：支援 Node.js 24，避免 2026/06 強制遷移警告
 
     steps:
       # ── 1. Checkout 程式碼 ──────────────────────────────────
-      # 修正：升級至 actions/checkout@v4.2.2 支援 Node.js 24
       - name: Checkout Repository
         uses: actions/checkout@v4.2.2
         with:
@@ -41,7 +41,6 @@ jobs:
           fetch-depth: 1
 
       # ── 2. 設定 Python ─────────────────────────────────────
-      # 修正：升級至 actions/setup-python@v5.4.0 支援 Node.js 24
       - name: Setup Python 3.11
         uses: actions/setup-python@v5.4.0
         with:
@@ -49,8 +48,8 @@ jobs:
           cache: pip
 
       # ── 3. 安裝依賴 ────────────────────────────────────────
-      # 修正：pandas-ta 在 PyPI 無 0.3.14b0，改從 GitHub 原始碼安裝
-      #       numpy 鎖定 <2.0 避免與 pandas-ta 不相容
+      # ✅ 修正：合併為單一 pip install 指令，pandas-ta 直接從 GitHub 安裝
+      #         避免分兩段安裝造成 PyPI 版本解析錯誤
       - name: Install Dependencies
         run: |
           pip install --upgrade pip
@@ -60,8 +59,7 @@ jobs:
             "numpy>=1.26.4,<2.0" \
             "scipy==1.13.1" \
             "pyarrow==16.1.0" \
-            "requests==2.32.3"
-          pip install \
+            "requests==2.32.3" \
             "git+https://github.com/twopirllc/pandas-ta.git@development"
 
       # ── 4. 確認 storage / data 目錄存在 ────────────────────
