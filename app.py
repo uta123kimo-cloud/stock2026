@@ -27,7 +27,7 @@ except ImportError:
 # ──────────────────────────────────────────────────────────────
 def _get_secret(key: str, default: str = "") -> str:
     try:
-        def _get_secret(key: str, default: str = "") -> str:
+def _get_secret(key: str, default: str = "") -> str:
     try:
         return st.secrets.get(key, default)
     except Exception:
