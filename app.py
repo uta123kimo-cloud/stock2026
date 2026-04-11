@@ -7,10 +7,12 @@
 """
 
 import json
+import html as _html_escape
 import requests
 import pandas as pd
 import numpy as np
 import streamlit as st
+import streamlit.components.v1 as components
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
@@ -225,7 +227,7 @@ html, body, .stApp {
     background: linear-gradient(135deg, rgba(139,92,246,0.05), rgba(59,130,246,0.05));
     border: 1px solid rgba(139,92,246,0.2); border-left: 3px solid var(--purple);
     border-radius: var(--radius); padding: 18px 22px;
-    font-size: 0.92rem; line-height: 1.85; color: var(--text);
+    font-size: 1.013rem; line-height: 1.95; color: var(--text);
 }
 
 /* 大盤指標卡 */
@@ -530,7 +532,68 @@ Regime: 熊{r.get('bear',0)*100:.0f}% | 震{r.get('range',0)*100:.0f}% | 牛{r.g
 # UI 工具函數
 # ══════════════════════════════════════════════════════════════
 
-def _color_num(val, positive_good=True):
+def _render_html(html_body: str, height: int = 400):
+    """用 components.html 渲染 HTML 表格，嵌入完整 CSS，解決 Streamlit Cloud unsafe_allow_html 限制"""
+    full_html = f"""
+    <!DOCTYPE html><html><head><meta charset="utf-8">
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&family=Noto+Sans+TC:wght@400;600;900&display=swap');
+    body {{
+        background: transparent; color: #e2e8f0;
+        font-family: 'Noto Sans TC', sans-serif;
+        margin: 0; padding: 0;
+    }}
+    .data-table {{ width:100%; border-collapse:collapse; font-size:0.82rem; }}
+    .data-table th {{
+        background:#1a2235; color:#64748b; font-weight:600;
+        font-family:'IBM Plex Mono',monospace; font-size:0.7rem; letter-spacing:0.5px;
+        padding:8px 12px; text-align:left; border-bottom:1px solid rgba(99,179,237,0.15);
+    }}
+    .data-table td {{ padding:9px 12px; border-bottom:1px solid rgba(99,179,237,0.06); vertical-align:middle; }}
+    .data-table tr:hover td {{ background:rgba(59,130,246,0.04); }}
+    .mono-num {{ font-family:'IBM Plex Mono',monospace; font-weight:700; }}
+    .c-green  {{ color:#10b981 !important; }}
+    .c-red    {{ color:#ef4444 !important; }}
+    .c-amber  {{ color:#f59e0b !important; }}
+    .c-blue   {{ color:#3b82f6 !important; }}
+    .c-cyan   {{ color:#06b6d4 !important; }}
+    .c-purple {{ color:#8b5cf6 !important; }}
+    .c-dim    {{ color:#64748b !important; }}
+    .pill {{
+        display:inline-block; padding:2px 9px; border-radius:12px;
+        font-size:0.7rem; font-weight:700; font-family:'IBM Plex Mono',monospace;
+        border:1px solid; margin:2px; white-space:nowrap;
+    }}
+    .pill-g {{ background:rgba(16,185,129,0.1);  border-color:rgba(16,185,129,0.35); color:#10b981; }}
+    .pill-r {{ background:rgba(239,68,68,0.1);   border-color:rgba(239,68,68,0.35);  color:#ef4444; }}
+    .pill-b {{ background:rgba(59,130,246,0.1);  border-color:rgba(59,130,246,0.35); color:#3b82f6; }}
+    .pill-a {{ background:rgba(245,158,11,0.1);  border-color:rgba(245,158,11,0.35); color:#f59e0b; }}
+    .pill-p {{ background:rgba(139,92,246,0.1);  border-color:rgba(139,92,246,0.35); color:#8b5cf6; }}
+    .pill-c {{ background:rgba(6,182,212,0.1);   border-color:rgba(6,182,212,0.35);  color:#06b6d4; }}
+    .rank-badge {{
+        display:inline-flex; align-items:center; justify-content:center;
+        width:26px; height:26px; border-radius:50%;
+        font-size:0.72rem; font-weight:900; font-family:'IBM Plex Mono',monospace;
+    }}
+    .rank-1 {{ background:linear-gradient(135deg,#f59e0b,#d97706); color:#000; }}
+    .rank-2 {{ background:linear-gradient(135deg,#94a3b8,#64748b); color:#fff; }}
+    .rank-3 {{ background:linear-gradient(135deg,#cd7c3a,#b45309); color:#fff; }}
+    .rank-n {{ background:#1a2235; color:#64748b; border:1px solid rgba(99,179,237,0.15); }}
+    .path-tag {{
+        display:inline-block; padding:3px 10px; border-radius:4px;
+        font-family:'IBM Plex Mono',monospace; font-size:0.72rem; font-weight:700;
+    }}
+    .path-45  {{ background:rgba(16,185,129,0.15);  color:#10b981; border:1px solid rgba(16,185,129,0.3); }}
+    .path-423 {{ background:rgba(59,130,246,0.15);  color:#3b82f6; border:1px solid rgba(59,130,246,0.3); }}
+    .path-na  {{ background:rgba(100,116,139,0.15); color:#64748b; border:1px solid rgba(99,179,237,0.15); }}
+    </style></head><body>
+    {html_body}
+    </body></html>
+    """
+    components.html(full_html, height=height, scrolling=True)
+
+
+
     if val is None: return "c-dim"
     if val > 0: return "c-green" if positive_good else "c-red"
     if val < 0: return "c-red" if positive_good else "c-green"
@@ -765,11 +828,9 @@ def render_v4_section(v4: dict):
         close   = r.get("close", 0)
         regime  = r.get("regime", "—")
 
-        # 安全 escape，防止資料值破壞 HTML 結構
-        import html as _html_mod
-        sym    = _html_mod.escape(str(sym))
-        signal = _html_mod.escape(str(signal))
-        regime = _html_mod.escape(str(regime))
+        sym    = _html_escape.escape(str(sym))
+        signal = _html_escape.escape(str(signal))
+        regime = _html_escape.escape(str(regime))
 
         rank_css    = {1:"rank-1",2:"rank-2",3:"rank-3"}.get(rank,"rank-n")
         pvo_css     = "c-green" if pvo > 10 else ("c-cyan" if pvo > 0 else "c-red")
@@ -799,7 +860,8 @@ def render_v4_section(v4: dict):
             <td style="color:#64748b;">{regime_icon} {regime}</td>
         </tr>"""
     html += "</tbody></table>"
-    st.markdown(html, unsafe_allow_html=True)
+    # 用 components.html 渲染，解決 Streamlit Cloud unsafe_allow_html 失效問題
+    _render_html(html, height=min(70 + len(filtered) * 46, 650))
 
 
 # ══════════════════════════════════════════════════════════════
@@ -858,12 +920,10 @@ def render_v12_section(v12: dict):
         tp1      = p.get("tp1_price","—")
         stop     = p.get("stop_price","—")
 
-        # 安全 escape，防止資料值破壞 HTML 結構
-        import html as _html_mod
-        sym     = _html_mod.escape(str(sym))
-        ev_tier = _html_mod.escape(str(ev_tier))
-        tp1     = _html_mod.escape(str(tp1))
-        stop    = _html_mod.escape(str(stop))
+        sym     = _html_escape.escape(str(sym))
+        ev_tier = _html_escape.escape(str(ev_tier))
+        tp1     = _html_escape.escape(str(tp1))
+        stop    = _html_escape.escape(str(stop))
 
         ev_css   = "c-green" if ev>5 else ("c-cyan" if ev>3 else "c-amber")
         ret_css  = "c-green" if curr_ret>0 else "c-red"
@@ -883,7 +943,8 @@ def render_v12_section(v12: dict):
             <td class="c-red mono-num" style="font-size:0.78rem;">{stop}</td>
         </tr>"""
     html += "</tbody></table>"
-    st.markdown(html, unsafe_allow_html=True)
+    # 用 components.html 渲染，解決 Streamlit Cloud unsafe_allow_html 失效問題
+    _render_html(html, height=min(70 + len(positions) * 46, 650))
 
     # 路徑分佈餅圖
     path_counts = {}
@@ -939,12 +1000,19 @@ def render_regime_section(regime: dict, market: dict):
 
     # 指標格
     mk = market or {}
-    idx_close  = mk.get("index_close", 0)
-    idx_chg    = mk.get("index_chg_pct", 0)
+    idx_close  = mk.get("index_close", None)   # None = 無真實資料
+    idx_chg    = mk.get("index_chg_pct", None)
     mkt_rsi    = mk.get("mkt_rsi", 0)
     adx_val    = regime.get("adx", 0)
 
-    chg_css = "c-green" if idx_chg >= 0 else "c-red"
+    # 判斷是否為 mock 資料（mock 固定值為 20843.5）
+    data_status = st.session_state.get("data_status", {})
+    market_is_live = data_status.get("market", False)
+
+    idx_close_str = f"{idx_close:,.1f}" if (idx_close and market_is_live) else "—"
+    idx_chg_str   = f"{idx_chg:+.2f}%" if (idx_chg is not None and market_is_live) else "—"
+    chg_color     = "#10b981" if (idx_chg and idx_chg >= 0) else "#ef4444"
+
     s5_css  = "c-green" if s5d >= 0 else "c-red"
     s20_css = "c-green" if s20d >= 0 else "c-red"
 
@@ -967,17 +1035,11 @@ def render_regime_section(regime: dict, market: dict):
             <div class="mkt-lbl">備援路徑</div>
         </div>
         <div class="mkt-cell">
-            <div class="mkt-val {'c-green' if idx_chg>=0 else 'c-red'}" 
-                 style="color:{'#10b981' if idx_chg>=0 else '#ef4444'}">
-                {idx_close:,.1f}
-            </div>
-            <div class="mkt-lbl">指數收盤</div>
+            <div class="mkt-val" style="color:{chg_color};">{idx_close_str}</div>
+            <div class="mkt-lbl">指數收盤{'&nbsp;📡' if market_is_live else '&nbsp;⚠️Demo'}</div>
         </div>
         <div class="mkt-cell">
-            <div class="mkt-val" 
-                 style="color:{'#10b981' if idx_chg>=0 else '#ef4444'}">
-                {idx_chg:+.2f}%
-            </div>
+            <div class="mkt-val" style="color:{chg_color};">{idx_chg_str}</div>
             <div class="mkt-lbl">日漲跌</div>
         </div>
         <div class="mkt-cell">
@@ -1285,6 +1347,9 @@ def main():
     prev_col1, prev_col2 = st.columns(2)
     data_status = st.session_state.get("data_status", {})
 
+    # 操作排序優先順序
+    ACTION_ORDER = {"強力買進":0,"買進":1,"進場":1,"持有":2,"觀察":3,"賣出":4,"出場":4,"觀望":5}
+
     with prev_col1:
         v4_live = data_status.get("v4", True)
         st.markdown(f"""
@@ -1293,24 +1358,31 @@ def main():
             <span class="sec-label">{'⚠️ Demo資料' if not v4_live else '✅ Live'}</span>
         </div>
         """, unsafe_allow_html=True)
-        top5 = (v4 or {}).get("top20", [])[:5]
+        top5_raw = (v4 or {}).get("top20", [])[:10]
+        # 依操作優先順序排序，取前5
+        top5 = sorted(top5_raw, key=lambda x: ACTION_ORDER.get(x.get("action",""), 99))[:5]
         if top5:
-            import html as _he
-            ph = '<table class="data-table"><thead><tr><th>#</th><th>代號</th><th>Score</th><th>操作</th><th>訊號</th></tr></thead><tbody>'
+            ph = '<table class="data-table"><thead><tr><th>#</th><th>代號</th><th>Score</th><th>操作</th><th>訊號</th><th>現價</th></tr></thead><tbody>'
             for r in top5:
-                rk   = r.get("rank","—")
-                sym  = _he.escape(str(r.get("symbol","—")))
-                sc   = r.get("score", 0)
-                act  = r.get("action","—")
-                sig  = _he.escape(str(r.get("signal","—")))
+                rk    = r.get("rank","—")
+                sym   = _html_escape.escape(str(r.get("symbol","—")))
+                sc    = r.get("score", 0)
+                act   = r.get("action","—")
+                sig   = _html_escape.escape(str(r.get("signal","—")))
+                close = r.get("close", 0)
                 rk_css = {1:"rank-1",2:"rank-2",3:"rank-3"}.get(rk,"rank-n")
+                if "三合一" in sig: sig_css = "pill-p"
+                elif "二合一" in sig: sig_css = "pill-b"
+                elif "單一" in sig: sig_css = "pill-a"
+                else: sig_css = "pill-c"
                 ph += f'<tr><td><span class="rank-badge {rk_css}">{rk}</span></td>'
                 ph += f'<td><b style="color:#e2e8f0;">{sym}</b></td>'
                 ph += f'<td><span class="mono-num">{sc:.2f}</span></td>'
                 ph += f'<td>{_action_pill(act)}</td>'
-                ph += f'<td><span class="pill pill-b" style="font-size:0.65rem;">{sig}</span></td></tr>'
+                ph += f'<td><span class="pill {sig_css}" style="font-size:0.65rem;">{sig}</span></td>'
+                ph += f'<td class="mono-num" style="color:#94a3b8;">{close:.1f}</td></tr>'
             ph += '</tbody></table>'
-            st.markdown(ph, unsafe_allow_html=True)
+            _render_html(ph, height=310)
         else:
             st.info("⏳ V4 資料讀取中")
 
@@ -1318,28 +1390,33 @@ def main():
         v12_live = data_status.get("v12", True)
         st.markdown(f"""
         <div class="sec-header sec-v12" style="margin-top:0;">
-            <span style="font-size:0.95rem;font-weight:900;color:#10b981;">🟩 V12.1 部位快覽</span>
+            <span style="font-size:0.95rem;font-weight:900;color:#10b981;">🟩 V12.1 TOP5 部位快覽</span>
             <span class="sec-label">{'⚠️ Demo資料' if not v12_live else '✅ Live'}</span>
         </div>
         """, unsafe_allow_html=True)
-        positions_prev = (v12 or {}).get("positions", [])[:5]
+        pos_raw = (v12 or {}).get("positions", [])
+        # 依操作優先順序排序，取前5
+        positions_prev = sorted(pos_raw, key=lambda x: ACTION_ORDER.get(x.get("action",""), 99))[:5]
         if positions_prev:
-            import html as _he2
-            ph2 = '<table class="data-table"><thead><tr><th>代號</th><th>路徑</th><th>EV</th><th>操作</th><th>出場</th></tr></thead><tbody>'
+            ph2 = '<table class="data-table"><thead><tr><th>代號</th><th>路徑</th><th>EV</th><th>操作</th><th>出場</th><th>停利①</th><th>停損</th></tr></thead><tbody>'
             for p in positions_prev:
-                sym  = _he2.escape(str(p.get("symbol","—")))
+                sym  = _html_escape.escape(str(p.get("symbol","—")))
                 path = p.get("path","—")
                 ev   = p.get("ev",0)
                 act  = p.get("action","—")
                 exs  = p.get("exit_signal","—")
+                tp1  = _html_escape.escape(str(p.get("tp1_price","—")))
+                stop = _html_escape.escape(str(p.get("stop_price","—")))
                 ev_css = "c-green" if ev>5 else ("c-cyan" if ev>3 else "c-amber")
                 ph2 += f'<tr><td><b style="color:#e2e8f0;">{sym}</b></td>'
                 ph2 += f'<td>{_path_tag(path)}</td>'
                 ph2 += f'<td><span class="mono-num {ev_css}">{ev:+.2f}%</span></td>'
                 ph2 += f'<td>{_action_pill(act)}</td>'
-                ph2 += f'<td>{_exit_pill(exs)}</td></tr>'
+                ph2 += f'<td>{_exit_pill(exs)}</td>'
+                ph2 += f'<td class="c-green mono-num" style="font-size:0.78rem;">{tp1}</td>'
+                ph2 += f'<td class="c-red mono-num" style="font-size:0.78rem;">{stop}</td></tr>'
             ph2 += '</tbody></table>'
-            st.markdown(ph2, unsafe_allow_html=True)
+            _render_html(ph2, height=310)
         else:
             st.info("⏳ V12.1 資料讀取中")
 
@@ -1350,7 +1427,7 @@ def main():
         "🟦 V4 市場強度",
         "🟩 V12.1 交易決策",
         "🟨 Regime 大盤",
-        "📜 交易歷史"
+        "📜 交易歷史"   # 保留Tab，首頁不顯示交易歷史捷徑連結
     ])
 
     with tab1:
