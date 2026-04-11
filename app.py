@@ -1118,15 +1118,15 @@ def render_single_stock_panel(v4: dict, v12: dict, regime: dict):
 
     if analyze_btn and sym_input:
         sym_q = sym_input.strip().upper()
-        prompt = build_single_stock_prompt(sym_q, v4, v12, regime)
+        prompt = build_single_stock_prompt(sym_q, v4, v12, regime)  
         with st.spinner(f"🤖 分析 {sym_q} 中..."):
             result = call_gemini(prompt, st.session_state.gemini_key)
         st.session_state.single_sym    = sym_q
         st.session_state.single_result = result
-        if hasattr(st, "rerun"):
-    st.rerun()
-else:
-    st.experimental_rerun()
+    if hasattr(st, "rerun"):
+        st.rerun()
+    else:
+        st.experimental_rerun()
 
 
 # ══════════════════════════════════════════════════════════════
