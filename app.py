@@ -5,7 +5,7 @@
 ║   資料來源：GitHub Raw JSON / Parquet (每日自動更新)           ║
 ╚══════════════════════════════════════════════════════════════╝
 """
-
+st.sidebar.write("Sidebar test")
 import json
 import requests
 import pandas as pd
