@@ -1,0 +1,20 @@
+{
+  "_comment": "此檔案由 daily_run.py 自動生成覆蓋，此為初始化佔位符",
+  "generated_at": "2026-04-11 00:00",
+  "date": "2026-04-11",
+  "market": "TW",
+  "regime": "range",
+  "active_path": "423",
+  "backup_path": "45",
+  "stats": {
+    "total_trades": 112,
+    "win_rate": 57.1,
+    "avg_ev": 5.29,
+    "max_dd": -6.58,
+    "sharpe": 5.36,
+    "t_stat": 4.032,
+    "simple_cagr": 96.9,
+    "pl_ratio": 2.31
+  },
+  "positions": []
+}

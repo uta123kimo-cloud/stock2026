@@ -1,0 +1,13 @@
+{
+  "_comment": "此檔案由 daily_run.py 自動生成覆蓋",
+  "generated_at": "2026-04-11 00:00",
+  "date": "2026-04-11",
+  "bear": 0.33, "range": 0.34, "bull": 0.33,
+  "label": "震盪",
+  "active_strategy": "range",
+  "active_path": "423",
+  "backup_path": "45",
+  "slope_5d": 0.0, "slope_20d": 0.0,
+  "mkt_rsi": 50.0, "adx": 20.0,
+  "history": []
+}

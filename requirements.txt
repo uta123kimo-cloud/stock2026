@@ -1,8 +1,20 @@
+# 資源法 AI 戰情室 v3.0 — 依賴套件
+
+# === Streamlit App 展示層 ===
 streamlit>=1.35.0
-yfinance>=0.2.40
-pandas>=2.0.0
+plotly>=5.21.0
+requests>=2.32.0
+pandas>=2.2.0
 numpy>=1.26.0
-plotly>=5.20.0
+pyarrow>=16.0.0          # Parquet 支援
+
+# === Gemini AI ===
 google-generativeai>=0.7.0
-requests>=2.31.0
-beautifulsoup4>=4.12.0
+
+# === 環境變數 ===
+python-dotenv>=1.0.0
+
+# === Compute Layer（daily_run.py 專用） ===
+yfinance==0.2.48
+pandas-ta==0.3.14b0
+scipy>=1.13.0
