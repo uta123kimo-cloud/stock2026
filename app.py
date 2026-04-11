@@ -39,9 +39,16 @@ _ENV_GEMINI_KEY = _get_secret("GEMINI_API_KEY")
 # GitHub 資料源設定（修改為你的 repo）
 # ──────────────────────────────────────────────────────────────
 GITHUB_RAW = "https://raw.githubusercontent.com/{owner}/{repo}/main/storage"
-GITHUB_OWNER = _get_secret("GITHUB_OWNER", "your-username")
-GITHUB_REPO  = _get_secret("GITHUB_REPO",  "quant-storage")
-BASE_URL     = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/main/storage"
+GITHUB_OWNER = _get_secret("GITHUB_OWNER", "uta123kimo-cloud")
+GITHUB_REPO  = _get_secret("GITHUB_REPO",  "stock2026")
+BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/main/storage"
+# ─── 建議路徑對應 (確保與你的 YAML mkdir -p 指令一致) ──────
+# 這樣在讀取不同策略時，路徑才不會出錯
+V4_PATH      = f"{BASE_URL}/v4"
+V12_PATH     = f"{BASE_URL}/v12"
+REGIME_PATH  = f"{BASE_URL}/regime"
+MARKET_PATH  = f"{BASE_URL}/market"
+
 
 # ──────────────────────────────────────────────────────────────
 # 頁面設定
