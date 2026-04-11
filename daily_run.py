@@ -247,21 +247,37 @@ def step_v4(eng, regime: dict) -> dict:
 
     ]
     try:
-        rows = []
-        for sym in RAW_SYMBOLS:
-            df = None
-            # 先試上市，再試上櫃（這樣比用 Ticker.history 檢查快很多）
-            for suffix in [".TW", ".TWO"]:
-                ticker = f"{sym}{suffix}"
-                df = yf.download(ticker, period="60d", progress=False, auto_adjust=True)
-                if not df.empty and len(df) >= 20:
-                    break # 抓到了就跳出 suffix 迴圈
-            
-            if df is None or df.empty:
-                log.warning(f"⚠️ {sym} 抓不到資料，跳過")
-                continue
+       rows = []
 
-            # ... 後續計算 RSI, PVO, VRI 的邏輯 ...
+for sym in SYMBOLS:
+
+    df_final = None
+
+    for suffix in [".TW", ".TWO"]:
+        ticker = f"{sym}{suffix}"
+
+        try:
+            df = yf.download(
+                ticker,
+                period="60d",
+                progress=False,
+                auto_adjust=True
+            )
+
+            if not df.empty and len(df) >= 20:
+                df_final = df
+                break
+
+        except Exception as e:
+            log.warning(f"{ticker} error: {e}")
+
+    if df_final is None:
+        log.warning(f"⚠️ {sym} 抓不到資料，跳過")
+        continue
+
+    df = df_final  # ✅ 這行很重要
+
+    # 👉 後續 RSI / slope / VRI 計算
      
     try:
         if eng and hasattr(eng, "run"):
@@ -399,20 +415,36 @@ def step_v12(eng, regime: dict, v4_data: dict) -> dict:
 
     try:
         rows = []
-        for sym in RAW_SYMBOLS:
-            df = None
-            # 先試上市，再試上櫃（這樣比用 Ticker.history 檢查快很多）
-            for suffix in [".TW", ".TWO"]:
-                ticker = f"{sym}{suffix}"
-                df = yf.download(ticker, period="60d", progress=False, auto_adjust=True)
-                if not df.empty and len(df) >= 20:
-                    break # 抓到了就跳出 suffix 迴圈
-            
-            if df is None or df.empty:
-                log.warning(f"⚠️ {sym} 抓不到資料，跳過")
-                continue
 
-            # ... 後續計算 RSI, PVO, VRI 的邏輯 ...
+for sym in SYMBOLS:
+
+    df_final = None
+
+    for suffix in [".TW", ".TWO"]:
+        ticker = f"{sym}{suffix}"
+
+        try:
+            df = yf.download(
+                ticker,
+                period="60d",
+                progress=False,
+                auto_adjust=True
+            )
+
+            if not df.empty and len(df) >= 20:
+                df_final = df
+                break
+
+        except Exception as e:
+            log.warning(f"{ticker} error: {e}")
+
+    if df_final is None:
+        log.warning(f"⚠️ {sym} 抓不到資料，跳過")
+        continue
+
+    df = df_final  # ✅ 這行很重要
+
+    # 👉 後續 RSI / slope / VRI 計算
 
 
     
