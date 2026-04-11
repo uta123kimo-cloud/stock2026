@@ -5,7 +5,19 @@
 ║   資料來源：GitHub Raw JSON / Parquet (每日自動更新)           ║
 ╚══════════════════════════════════════════════════════════════╝
 """
-st.sidebar.write("Sidebar test")
+DEMO_MODE = True
+if DEMO_MODE:
+    import pandas as pd
+    import numpy as np
+
+    df = pd.DataFrame({
+        "date": pd.date_range("2024-01-01", periods=100),
+        "price": np.random.randn(100).cumsum()
+    })
+else:
+    df = load_real_data()  # 你的 V4 / V12
+
+
 import json
 import requests
 import pandas as pd
