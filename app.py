@@ -1123,7 +1123,10 @@ def render_single_stock_panel(v4: dict, v12: dict, regime: dict):
             result = call_gemini(prompt, st.session_state.gemini_key)
         st.session_state.single_sym    = sym_q
         st.session_state.single_result = result
-        st.rerun()
+        if hasattr(st, "rerun"):
+    st.rerun()
+else:
+    st.experimental_rerun()
 
 
 # ══════════════════════════════════════════════════════════════
