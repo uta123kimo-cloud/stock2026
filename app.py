@@ -289,7 +289,7 @@ def load_json(path_suffix: str) -> dict | list | None:
     """從 GitHub 讀取 JSON 快照"""
     url = f"{BASE_URL}/{path_suffix}"
     try:
-        r = requests.get(url, timeout=10)
+        r = requests.get(url, timeout=3)
         if r.status_code == 200:
             return r.json()
         return None
