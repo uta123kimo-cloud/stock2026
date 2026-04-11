@@ -1,6 +1,11 @@
 name: 資源法 Daily Compute
 
 on:
+  workflow_dispatch:
+  schedule:
+    - cron: "55 12 * * 1-6"
+
+
   # ──────────────────────────────────────────────────────────
   # 精準 CRON 排程（UTC 時間 = 台灣時間 - 8 小時）
   # 已移除 workflow_dispatch 手動觸發，避免意外啟動
@@ -22,9 +27,7 @@ on:
     #20:50 台灣 = 12:55 UTC（日結存檔）
     - cron: "55 12 * * 1-6"
 
-      workflow_dispatch:  # 加入這行
-      schedule:
-    - cron: "55 12 * * 1-6"
+     
 
 
 jobs:
