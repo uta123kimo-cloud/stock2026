@@ -19,7 +19,8 @@ on:
     - cron: "30 7 * * 1-5"
     # 18:00 台灣 = 10:00 UTC（日結存檔）
     - cron: "0 10 * * 1-5"
-
+    #20:50 台灣 = 12:50 UTC（日結存檔）
+    - cron: "0 10 * * 1-6"
 jobs:
   compute:
     runs-on: ubuntu-latest
