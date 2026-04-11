@@ -35,10 +35,27 @@ try:
 except ImportError:
     yf = None
 
-try:
-    import pandas_ta as ta
-except ImportError:
-    ta = None
+# [FIX] pandas_ta 已移除 → 使用內建純 numpy/pandas 實作
+# 設定旗標供 daily_run.py 識別
+_USES_PANDAS_TA = False
+
+# ══════════════════════════════════════════════════════════════════
+# [FIX] 純 numpy/pandas 指標函式（取代 pandas_ta，零外部依賴）
+# ══════════════════════════════════════════════════════════════════
+
+def _ta_rsi(close, period=14):
+    delta = close.diff()
+    gain  = delta.clip(lower=0).ewm(com=period-1, min_periods=period, adjust=False).mean()
+    loss  = (-delta.clip(upper=0)).ewm(com=period-1, min_periods=period, adjust=False).mean()
+    return 100 - 100 / (1 + gain / (loss + 1e-9))
+
+def _ta_atr(high, low, close, period=14):
+    pc = close.shift(1)
+    tr = pd.concat([high-low,(high-pc).abs(),(low-pc).abs()],axis=1).max(axis=1)
+    return tr.ewm(com=period-1, min_periods=period, adjust=False).mean()
+
+def _ta_sma(close, period):
+    return close.rolling(period).mean()
 
 # ══════════════════════════════════════════════════════════════════
 # 【V4-升級1】訊號門檻參數（完整繼承自原始 V4）
@@ -286,8 +303,8 @@ def _compute_stock_indicators(df):
     計算 V4 所需的全部技術指標。
     回傳含指標欄位的 DataFrame，或 None（資料不足）。
     """
-    if ta is None or np is None or pd is None:
-        log.error("pandas_ta / numpy / pandas 未安裝，無法計算指標")
+    if np is None or pd is None:
+        log.error("numpy / pandas 未安裝，無法計算指標")
         return None
     if df is None or len(df) < MIN_DATA_ROWS:
         return None
@@ -297,9 +314,10 @@ def _compute_stock_indicators(df):
     df.columns = [str(c).strip() for c in df.columns]
 
     try:
-        df['RSI']        = ta.rsi(df['Close'], 14)
-        df['ATR']        = ta.atr(df['High'], df['Low'], df['Close'], 14)
-        df['MA50']       = ta.sma(df['Close'], 50)
+        # [FIX] 使用內建純 numpy 函式，不需 pandas_ta
+        df['RSI']        = _ta_rsi(df['Close'], 14)
+        df['ATR']        = _ta_atr(df['High'], df['Low'], df['Close'], 14)
+        df['MA50']       = _ta_sma(df['Close'], 50)
         df['PVO']        = _calc_pvo(df)
         df['VRI']        = _calc_vri(df)
         df['Slope']      = df['Close'].pct_change(5) * 100
@@ -406,7 +424,6 @@ def run(symbols: list, regime: dict, today: str,
     if np is None or pd is None:
         log.error("❌ numpy / pandas 未安裝，V4 引擎無法運行")
         return {}
-
     # 解析 Regime
     regime_label_str = regime.get('label', '震盪')
     regime_type      = _classify_regime_from_label(regime_label_str)
