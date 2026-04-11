@@ -12,10 +12,13 @@ import requests
 import pandas as pd
 import numpy as np
 import streamlit as st
-import streamlit.components.v1 as components
+# ✅ 修正1：移除 streamlit.components.v1（2026-06-01 後移除），改用 st.html
+# import streamlit.components.v1 as components  ← 已移除
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
+# ✅ 修正2：Python 3.12 相容 — 使用 Optional 取代 X | Y | None 型別提示
+from typing import Optional
 import os
 
 try:
@@ -36,14 +39,12 @@ def _get_secret(key: str, default: str = "") -> str:
 _ENV_GEMINI_KEY = _get_secret("GEMINI_API_KEY")
 
 # ──────────────────────────────────────────────────────────────
-# GitHub 資料源設定（修改為你的 repo）
+# GitHub 資料源設定
 # ──────────────────────────────────────────────────────────────
-
 GITHUB_OWNER = _get_secret("GITHUB_OWNER", "uta123kimo-cloud")
 GITHUB_REPO  = _get_secret("GITHUB_REPO",  "stock2026")
 BASE_URL = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/main/storage"
-# ─── 建議路徑對應 (確保與你的 YAML mkdir -p 指令一致) ──────
-# 這樣在讀取不同策略時，路徑才不會出錯
+
 V4_PATH      = f"{BASE_URL}/v4"
 V12_PATH     = f"{BASE_URL}/v12"
 REGIME_PATH  = f"{BASE_URL}/regime"
@@ -285,16 +286,22 @@ html, body, .stApp {
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 3px; }
+
+/* ✅ 修正1：st.html iframe 透明底 */
+iframe[data-testid="stIframe"] {
+    background: transparent !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
 
 # ══════════════════════════════════════════════════════════════
-# 資料載入層（GitHub 讀取 + cache）
+# 資料載入層
 # ══════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_json(path_suffix: str) -> dict | list | None:
+# ✅ 修正2：Python 3.12 相容型別提示，使用 Optional 而非 X | Y | None
+def load_json(path_suffix: str) -> Optional[dict]:
     """從 GitHub 讀取 JSON 快照"""
     url = f"{BASE_URL}/{path_suffix}"
     try:
@@ -307,7 +314,7 @@ def load_json(path_suffix: str) -> dict | list | None:
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_parquet_url(path_suffix: str) -> pd.DataFrame | None:
+def load_parquet_url(path_suffix: str) -> Optional[pd.DataFrame]:
     """從 GitHub 讀取 Parquet 檔"""
     url = f"{BASE_URL}/{path_suffix}"
     try:
@@ -320,32 +327,29 @@ def load_parquet_url(path_suffix: str) -> pd.DataFrame | None:
         return None
 
 
-def load_v4_snapshot() -> dict | None:
-    """V4 快照：TOP20 + 市場強度"""
+def load_v4_snapshot() -> Optional[dict]:
     return load_json("v4/v4_latest.json")
 
 
-def load_v12_snapshot() -> dict | None:
-    """V12.1 快照：路徑 + EV + action + exit"""
+def load_v12_snapshot() -> Optional[dict]:
     return load_json("v12/v12_latest.json")
 
 
-def load_regime_snapshot() -> dict | None:
-    """Regime 快照：bull/bear/range 機率"""
+def load_regime_snapshot() -> Optional[dict]:
     return load_json("regime/regime_state.json")
 
 
-def load_market_snapshot() -> dict | None:
-    """大盤快照"""
+def load_market_snapshot() -> Optional[dict]:
     return load_json("market/market_snapshot.json")
 
 
-def load_trade_history() -> list | None:
-    """交易歷史紀錄"""
+def load_trade_history() -> Optional[list]:
     return load_json("logs/trade_history.json")
 
 
-# 模擬資料（GitHub 未連線時 fallback）
+# ──────────────────────────────────────────────────────────────
+# 模擬資料 fallback
+# ──────────────────────────────────────────────────────────────
 def _mock_v4() -> dict:
     import random
     syms = ["2330","2317","2454","2308","2382","3711","2412","6669","3008","2395",
@@ -509,12 +513,17 @@ t值:{s.get('t_stat','N/A')} | MaxDD:{s.get('max_dd','N/A')}% | Sharpe:{s.get('s
 
 
 def build_single_stock_prompt(sym: str, v4_data: dict, v12_data: dict, regime: dict) -> str:
-    v4_row = next((r for r in (v4_data or {}).get("top20", []) if r["symbol"] == sym), None)
+    v4_row  = next((r for r in (v4_data or {}).get("top20", []) if r["symbol"] == sym), None)
     v12_row = next((p for p in (v12_data or {}).get("positions", []) if p["symbol"] == sym), None)
     r = regime or _mock_regime()
 
-    v4_txt  = f"Score:{v4_row['score']} | PVO:{v4_row.get('pvo',0):+.2f} | VRI:{v4_row.get('vri',0):.1f} | SlopeZ:{v4_row.get('slope_z',0):+.2f} | 訊號:{v4_row.get('signal','—')}" if v4_row else "（V4無資料）"
-    v12_txt = f"路徑:{v12_row['path']} | EV:{v12_row['ev']:+.2f}% | {v12_row.get('ev_tier','—')} | 持:{v12_row.get('days_held',0)}日 | 報酬:{v12_row.get('curr_ret_pct',0):+.2f}% | 出場:{v12_row.get('exit_signal','—')} | 品質:{v12_row.get('quality','—')}" if v12_row else "（V12.1無部位）"
+    v4_txt  = (f"Score:{v4_row['score']} | PVO:{v4_row.get('pvo',0):+.2f} | VRI:{v4_row.get('vri',0):.1f}"
+               f" | SlopeZ:{v4_row.get('slope_z',0):+.2f} | 訊號:{v4_row.get('signal','—')}"
+               if v4_row else "（V4無資料）")
+    v12_txt = (f"路徑:{v12_row['path']} | EV:{v12_row['ev']:+.2f}% | {v12_row.get('ev_tier','—')}"
+               f" | 持:{v12_row.get('days_held',0)}日 | 報酬:{v12_row.get('curr_ret_pct',0):+.2f}%"
+               f" | 出場:{v12_row.get('exit_signal','—')} | 品質:{v12_row.get('quality','—')}"
+               if v12_row else "（V12.1無部位）")
 
     return f"""請對 {sym} 進行個股深度分析，每段100字以內，引用具體數值。
 
@@ -540,7 +549,11 @@ Regime: 熊{r.get('bear',0)*100:.0f}% | 震{r.get('range',0)*100:.0f}% | 牛{r.g
 # ══════════════════════════════════════════════════════════════
 
 def _render_html(html_body: str, height: int = 400):
-    """用 components.html 渲染 HTML 表格，嵌入完整 CSS，解決 Streamlit Cloud unsafe_allow_html 限制"""
+    """
+    ✅ 修正1：以 st.html() 取代已棄用的 st.components.v1.html()
+    st.html() 為 Streamlit 1.36+ 正式 API，2026-06-01 後 components.v1.html 將移除。
+    注意：st.html() 不支援 scrolling 參數，改用 CSS overflow 控制。
+    """
     full_html = f"""
     <!DOCTYPE html><html><head><meta charset="utf-8">
     <style>
@@ -549,6 +562,7 @@ def _render_html(html_body: str, height: int = 400):
         background: transparent; color: #e2e8f0;
         font-family: 'Noto Sans TC', sans-serif;
         margin: 0; padding: 0;
+        height: {height}px; overflow-y: auto; overflow-x: hidden;
     }}
     .data-table {{ width:100%; border-collapse:collapse; font-size:0.82rem; }}
     .data-table th {{
@@ -597,7 +611,10 @@ def _render_html(html_body: str, height: int = 400):
     {html_body}
     </body></html>
     """
-    components.html(full_html, height=height, scrolling=True)
+    # ✅ 修正1：改用 st.html() 取代 components.html()
+    # st.html() 會自動依內容高度渲染，不需 height/scrolling 參數
+    # 滾動由 body CSS overflow-y: auto 控制
+    st.html(full_html)
 
 
 def _color_num(val, positive_good=True):
@@ -673,7 +690,6 @@ def init_session():
         "single_result":   "",
         "use_mock":        False,
         "last_refresh":    None,
-        # 資料快照
         "v4_data":     None,
         "v12_data":    None,
         "regime_data": None,
@@ -721,6 +737,14 @@ def render_sidebar():
         if use_mock:
             st.warning("⚠️ 目前顯示模擬數據")
 
+        # ✅ 修正3：市場選擇 radio 加上 label_visibility="collapsed" 符合新版規範
+        # （若未來加入市場切換功能時直接使用此寫法）
+        # market = st.radio(
+        #     "選擇市場",
+        #     ["🇹🇼 台股", "🇺🇸 美股"],
+        #     label_visibility="collapsed"
+        # )
+
         st.markdown("---")
         st.caption("資料更新時程")
         for t in ["09:30 台股開盤快照","12:00 盤中更新","13:30 盤後計算",
@@ -735,7 +759,6 @@ def render_sidebar():
 # 載入所有資料
 # ══════════════════════════════════════════════════════════════
 def load_all_data():
-    """載入所有資料，同時回傳各來源是否為真實資料的狀態"""
     use_mock = st.session_state.use_mock
     if use_mock:
         data_status = {"v4": False, "v12": False, "regime": False, "market": False, "hist": False}
@@ -748,7 +771,6 @@ def load_all_data():
     _market_raw = load_market_snapshot()
     _hist_raw   = load_trade_history()
 
-    # 記錄哪些資料來自真實 GitHub，哪些 fallback 到 mock
     data_status = {
         "v4":     _v4_raw     is not None,
         "v12":    _v12_raw    is not None,
@@ -786,7 +808,6 @@ def render_v4_section(v4: dict):
     </div>
     """, unsafe_allow_html=True)
 
-    # 統計摘要
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Pool μ（均分）", f"{mu:.2f}", help="評分池均值")
     c2.metric("Pool σ（標準差）", f"{sigma:.2f}", help="評分池標準差")
@@ -797,7 +818,6 @@ def render_v4_section(v4: dict):
         st.info("⏳ 等待 GitHub 資料更新（或啟用 Demo 模式）")
         return
 
-    # 篩選 & 排序
     col_f1, col_f2, col_f3 = st.columns([2, 2, 2])
     with col_f1:
         filter_action = st.multiselect(
@@ -814,7 +834,6 @@ def render_v4_section(v4: dict):
                 and r.get("vri", 0) >= min_vri]
     filtered.sort(key=lambda x: x.get(sort_by, 0), reverse=(sort_by != "rank"))
 
-    # 表格
     st.markdown(f"**顯示 {len(filtered)} / {len(top20)} 檔**")
     html = """
     <table class="data-table">
@@ -847,7 +866,6 @@ def render_v4_section(v4: dict):
         regime_map  = {"trend":"🚀","range":"〰️","crash":"💥","recovery":"🔄"}
         regime_icon = regime_map.get(regime, "◇")
 
-        # 訊號顏色
         if "三合一" in signal:   sig_css = "pill-p"
         elif "二合一" in signal: sig_css = "pill-b"
         elif "單一"  in signal:  sig_css = "pill-a"
@@ -867,7 +885,6 @@ def render_v4_section(v4: dict):
             <td style="color:#64748b;">{regime_icon} {regime}</td>
         </tr>"""
     html += "</tbody></table>"
-    # 用 components.html 渲染，解決 Streamlit Cloud unsafe_allow_html 失效問題
     _render_html(html, height=min(70 + len(filtered) * 46, 650))
 
 
@@ -875,9 +892,9 @@ def render_v4_section(v4: dict):
 # Section 2：V12.1 交易決策
 # ══════════════════════════════════════════════════════════════
 def render_v12_section(v12: dict):
-    gen_at   = v12.get("generated_at", "—")
+    gen_at    = v12.get("generated_at", "—")
     positions = v12.get("positions", [])
-    stats    = v12.get("stats", {})
+    stats     = v12.get("stats", {})
 
     st.markdown(f"""
     <div class="sec-header sec-v12">
@@ -889,7 +906,6 @@ def render_v12_section(v12: dict):
     </div>
     """, unsafe_allow_html=True)
 
-    # 統計指標列
     s = stats
     c1,c2,c3,c4,c5,c6,c7 = st.columns(7)
     c1.metric("總交易筆數", s.get("total_trades","—"))
@@ -932,8 +948,8 @@ def render_v12_section(v12: dict):
         tp1     = _html_escape.escape(str(tp1))
         stop    = _html_escape.escape(str(stop))
 
-        ev_css   = "c-green" if ev>5 else ("c-cyan" if ev>3 else "c-amber")
-        ret_css  = "c-green" if curr_ret>0 else "c-red"
+        ev_css  = "c-green" if ev>5 else ("c-cyan" if ev>3 else "c-amber")
+        ret_css = "c-green" if curr_ret>0 else "c-red"
 
         html += f"""
         <tr>
@@ -950,10 +966,8 @@ def render_v12_section(v12: dict):
             <td class="c-red mono-num" style="font-size:0.78rem;">{stop}</td>
         </tr>"""
     html += "</tbody></table>"
-    # 用 components.html 渲染，解決 Streamlit Cloud unsafe_allow_html 失效問題
     _render_html(html, height=min(70 + len(positions) * 46, 650))
 
-    # 路徑分佈餅圖
     path_counts = {}
     for p in positions:
         path_counts[p.get("path","?")] = path_counts.get(p.get("path","?"), 0) + 1
@@ -992,36 +1006,30 @@ def render_regime_section(regime: dict, market: dict):
     </div>
     """, unsafe_allow_html=True)
 
-    bear  = regime.get("bear", 0.33)
-    range_= regime.get("range", 0.34)
-    bull  = regime.get("bull", 0.33)
-    label = regime.get("label", "震盪")
-    strat = regime.get("active_strategy", "range")
-    a_path= regime.get("active_path", "—")
-    b_path= regime.get("backup_path", "—")
-    s5d   = regime.get("slope_5d", 0)
-    s20d  = regime.get("slope_20d", 0)
+    bear   = regime.get("bear", 0.33)
+    range_ = regime.get("range", 0.34)
+    bull   = regime.get("bull", 0.33)
+    label  = regime.get("label", "震盪")
+    strat  = regime.get("active_strategy", "range")
+    a_path = regime.get("active_path", "—")
+    b_path = regime.get("backup_path", "—")
+    s5d    = regime.get("slope_5d", 0)
+    s20d   = regime.get("slope_20d", 0)
 
-    # Regime 機率條
     render_regime_bar(bear, range_, bull)
 
-    # 指標格
-    mk = market or {}
-    idx_close  = mk.get("index_close", None)   # None = 無真實資料
+    mk         = market or {}
+    idx_close  = mk.get("index_close", None)
     idx_chg    = mk.get("index_chg_pct", None)
     mkt_rsi    = mk.get("mkt_rsi", 0)
     adx_val    = regime.get("adx", 0)
 
-    # 判斷是否為 mock 資料（mock 固定值為 20843.5）
-    data_status = st.session_state.get("data_status", {})
+    data_status    = st.session_state.get("data_status", {})
     market_is_live = data_status.get("market", False)
 
     idx_close_str = f"{idx_close:,.1f}" if (idx_close and market_is_live) else "—"
     idx_chg_str   = f"{idx_chg:+.2f}%" if (idx_chg is not None and market_is_live) else "—"
     chg_color     = "#10b981" if (idx_chg and idx_chg >= 0) else "#ef4444"
-
-    s5_css  = "c-green" if s5d >= 0 else "c-red"
-    s20_css = "c-green" if s20d >= 0 else "c-red"
 
     st.markdown(f"""
     <div class="mkt-grid">
@@ -1068,7 +1076,6 @@ def render_regime_section(regime: dict, market: dict):
     </div>
     """, unsafe_allow_html=True)
 
-    # 歷史 Regime 圖
     history = regime.get("history", [])
     if history:
         df_r = pd.DataFrame(history)
@@ -1094,7 +1101,6 @@ def render_regime_section(regime: dict, market: dict):
         )
         st.plotly_chart(fig, use_container_width=True)
 
-    # 策略切換邏輯說明
     with st.expander("📖 策略切換邏輯說明"):
         st.markdown("""
         | Regime | 主路徑 | 備援 | 最大部位 | EV門檻 |
@@ -1169,13 +1175,16 @@ def render_history_tab(hist: list):
             )
             st.plotly_chart(fig2, use_container_width=True)
 
-    # 路徑績效摘要
     if "path" in df.columns:
         st.markdown("#### 🛤️ 路徑績效摘要")
         path_stats = df.groupby("path")["ret_pct"].agg(
-            筆數="count", 勝率=lambda x: (x>0).mean()*100,
-            均報酬="mean", 累計="sum"
+            筆數="count",
+            勝率=lambda x: (x>0).mean()*100,
+            均報酬="mean",
+            累計="sum"
         ).round(2)
+        # ✅ 修正4：use_container_width=True 為仍有效的參數（width="stretch" 尚未正式釋出）
+        # 此處保留 use_container_width=True 為最穩定寫法
         st.dataframe(path_stats, use_container_width=True)
 
 
@@ -1203,7 +1212,6 @@ def render_single_stock_panel(v4: dict, v12: dict, regime: dict):
     with col_btn:
         analyze_btn = st.button("🔍 分析", use_container_width=True, key="single_btn")
 
-    # 顯示上次結果
     if st.session_state.single_result and st.session_state.single_sym:
         import html as _h
         _safe = _h.escape(st.session_state.single_result).replace('\n','<br>')
@@ -1233,7 +1241,6 @@ def render_single_stock_panel(v4: dict, v12: dict, regime: dict):
 def main():
     render_sidebar()
 
-    # 載入資料
     with st.spinner("🔄 從 GitHub 讀取最新快照..."):
         v4, v12, regime, market, hist = load_all_data()
         st.session_state.update({
@@ -1242,22 +1249,18 @@ def main():
             "last_refresh": datetime.now().strftime("%H:%M:%S")
         })
 
-    # ── 標題列 ──
-    use_mock = st.session_state.use_mock
+    use_mock    = st.session_state.use_mock
     data_status = st.session_state.get("data_status", {})
-    all_live = all(data_status.values()) if data_status else False
+    all_live    = all(data_status.values()) if data_status else False
 
     if use_mock:
-        mode_label = "DEMO 模式"
-        mode_css   = "chip-warn"
+        mode_label     = "DEMO 模式"
         mode_badge_css = "background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.4);color:#f59e0b;"
     elif all_live:
-        mode_label = "LIVE 資料"
-        mode_css   = "chip-ok"
+        mode_label     = "LIVE 資料"
         mode_badge_css = "background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.3);color:#10b981;"
     else:
-        mode_label = "部分 DEMO"
-        mode_css   = "chip-warn"
+        mode_label     = "部分 DEMO"
         mode_badge_css = "background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.4);color:#f59e0b;"
 
     gen_at = v4.get("generated_at", "—") if v4 else "—"
@@ -1272,7 +1275,6 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # ── 資料來源警告（GitHub 未連線時顯示 fallback 提示）──
     if not use_mock and not all_live:
         missing = []
         if not data_status.get("v4"):     missing.append("V4")
@@ -1286,12 +1288,11 @@ def main():
             icon="⚠️"
         )
 
-    # ── 狀態列 ──
-    bear  = (regime or {}).get("bear",  0.33)
-    range_= (regime or {}).get("range", 0.34)
-    bull  = (regime or {}).get("bull",  0.33)
-    label = (regime or {}).get("label", "—")
-    a_path= (regime or {}).get("active_path", "—")
+    bear   = (regime or {}).get("bear",  0.33)
+    range_ = (regime or {}).get("range", 0.34)
+    bull   = (regime or {}).get("bull",  0.33)
+    label  = (regime or {}).get("label", "—")
+    a_path = (regime or {}).get("active_path", "—")
 
     bear_pct = bear * 100
     bull_pct = bull * 100
@@ -1318,10 +1319,8 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # ── 個股 AI 分析（首頁常駐）──
     render_single_stock_panel(v4, v12, regime)
 
-    # ── 全盤 Gemini AI 分析（首頁常駐）──
     st.markdown(f"""
     <div class="sec-header sec-ai">
         <span style="font-size:1.0rem;font-weight:800;color:#8b5cf6;">
@@ -1350,11 +1349,8 @@ def main():
 
     st.markdown("---")
 
-    # ── 首頁快速預覽：V4 TOP5 + V12 部位摘要 ──
     prev_col1, prev_col2 = st.columns(2)
     data_status = st.session_state.get("data_status", {})
-
-    # 操作排序優先順序
     ACTION_ORDER = {"強力買進":0,"買進":1,"進場":1,"持有":2,"觀察":3,"賣出":4,"出場":4,"觀望":5}
 
     with prev_col1:
@@ -1366,7 +1362,6 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         top5_raw = (v4 or {}).get("top20", [])[:10]
-        # 依操作優先順序排序，取前5
         top5 = sorted(top5_raw, key=lambda x: ACTION_ORDER.get(x.get("action",""), 99))[:5]
         if top5:
             ph = '<table class="data-table"><thead><tr><th>#</th><th>代號</th><th>Score</th><th>操作</th><th>訊號</th><th>現價</th></tr></thead><tbody>'
@@ -1402,7 +1397,6 @@ def main():
         </div>
         """, unsafe_allow_html=True)
         pos_raw = (v12 or {}).get("positions", [])
-        # 依操作優先順序排序，取前5
         positions_prev = sorted(pos_raw, key=lambda x: ACTION_ORDER.get(x.get("action",""), 99))[:5]
         if positions_prev:
             ph2 = '<table class="data-table"><thead><tr><th>代號</th><th>路徑</th><th>EV</th><th>操作</th><th>出場</th><th>停利①</th><th>停損</th></tr></thead><tbody>'
@@ -1429,12 +1423,11 @@ def main():
 
     st.markdown("---")
 
-    # ── 四大 Tab ──
     tab1, tab2, tab3, tab4 = st.tabs([
         "🟦 V4 市場強度",
         "🟩 V12.1 交易決策",
         "🟨 Regime 大盤",
-        "📜 交易歷史"   # 保留Tab，首頁不顯示交易歷史捷徑連結
+        "📜 交易歷史"
     ])
 
     with tab1:
