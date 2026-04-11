@@ -25,8 +25,7 @@ except ImportError:
 # ──────────────────────────────────────────────────────────────
 # 環境設定
 # ──────────────────────────────────────────────────────────────
-def _get_secret(key: str, default: str = "") -> str:
-    try:
+
 def _get_secret(key: str, default: str = "") -> str:
     try:
         return st.secrets.get(key, default)
