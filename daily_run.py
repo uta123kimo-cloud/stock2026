@@ -1,13 +1,13 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  daily_run.py v3.2  資源法 Precompute 主控制器               ║
+║  daily_run.py v3.3  資源法 Precompute 主控制器               ║
 ║                                                              ║
-║  修正清單 v3.2：                                              ║
-║  [FIX-1] 移除 pandas_ta 所有依賴 → 純 numpy/pandas 實作      ║
-║  [FIX-2] yfinance Rate Limit → 序列下載 + 指數退讓 sleep     ║
-║  [FIX-3] v4/v12 引擎中的 ta.* 全部換成內建純 numpy 函式      ║
-║  [FIX-4] 新增 regime/feature/risk engine（inline stub）      ║
-║  [FIX-5] requirements_compute.txt 移除 pandas_ta            ║
+║  修正清單 v3.3：                                             ║
+║  [FIX-1] 統一修正所有 IndentationError 縮排問題              ║
+║  [FIX-2] 加入 requests.Session 偽裝真實瀏覽器破解 429 封鎖   ║
+║  [FIX-3] 強化 yfinance 指數退讓與迴圈基礎等待時間            ║
+║  [FIX-4] 整合 Regime, Feature, Risk Engine Inline            ║
+║  [FIX-5] 完全移除 pandas_ta，使用純 Numpy/Pandas 實作        ║
 ╚══════════════════════════════════════════════════════════════╝
 """
 
@@ -22,18 +22,15 @@ from datetime import datetime, date
 
 import numpy as np
 import pandas as pd
+import requests
 
 try:
     import yfinance as yf
 except ImportError:
     yf = None
 
-try:
-    from scipy import stats as _scipy_stats
-    _HAS_SCIPY = True
-except ImportError:
-    _HAS_SCIPY = False
-
+# ──────────────────────────────────────────────────────────────
+# 系統設定與日誌
 # ──────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -42,7 +39,6 @@ logging.basicConfig(
 )
 log = logging.getLogger("daily_run")
 
-# ──────────────────────────────────────────────────────────────
 ROOT_DIR    = os.path.dirname(os.path.abspath(__file__))
 STORAGE_DIR = os.path.join(ROOT_DIR, "storage")
 V4_DIR      = os.path.join(STORAGE_DIR, "v4")
@@ -58,6 +54,16 @@ TS    = datetime.now().strftime("%Y%m%d_%H%M")
 for _d in [V4_DIR, V12_DIR, REGIME_DIR, MARKET_DIR, LOGS_DIR, DATA_ROOT]:
     os.makedirs(_d, exist_ok=True)
 
+# 建立偽裝瀏覽器的 Session 以繞過 Yahoo 429 限制
+_SESSION = requests.Session()
+_SESSION.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+})
+
+# ──────────────────────────────────────────────────────────────
+# 股票池
 # ──────────────────────────────────────────────────────────────
 SYMBOLS = list(dict.fromkeys([
     "2330","2317","2454","2308","2382","2303","3711","2412","2357","3231",
@@ -81,9 +87,8 @@ SYMBOLS = list(dict.fromkeys([
     "6546","6706","6831","6861","6877","8028","8111",
 ]))
 
-
 # ══════════════════════════════════════════════════════════════
-# [FIX-1] 純 numpy/pandas 技術指標（完全取代 pandas_ta）
+# 純 Numpy/Pandas 技術指標（零 pandas_ta）
 # ══════════════════════════════════════════════════════════════
 
 def _rsi(close: pd.Series, period: int = 14) -> pd.Series:
@@ -92,14 +97,12 @@ def _rsi(close: pd.Series, period: int = 14) -> pd.Series:
     loss  = (-delta.clip(upper=0)).ewm(com=period-1, min_periods=period, adjust=False).mean()
     return 100 - 100 / (1 + gain / (loss + 1e-9))
 
-
 def _atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
     prev_c = close.shift(1)
     tr = pd.concat([high - low,
                     (high - prev_c).abs(),
                     (low  - prev_c).abs()], axis=1).max(axis=1)
     return tr.ewm(com=period-1, min_periods=period, adjust=False).mean()
-
 
 def _adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
     prev_h = high.shift(1); prev_l = low.shift(1); prev_c = close.shift(1)
@@ -117,19 +120,16 @@ def _adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) ->
     dx    = 100 * (pdi - mdi).abs() / (pdi + mdi + 1e-9)
     return _ew(dx.values)
 
-
 def _pvo(volume: pd.Series, fast: int = 5, slow: int = 20) -> pd.Series:
     vf = volume.ewm(span=fast, adjust=False).mean()
     vs = volume.ewm(span=slow, adjust=False).mean()
     return (vf - vs) / (vs + 1e-9) * 100
-
 
 def _vri(rsi: pd.Series, atr: pd.Series, window: int = 20) -> pd.Series:
     rsi_norm = rsi.clip(0, 100)
     atr_mean = atr.rolling(window).mean()
     atr_norm = (atr / (atr_mean + 1e-9) * 50).clip(0, 100)
     return (rsi_norm * 0.6 + atr_norm * 0.4).clip(0, 100)
-
 
 def _pvo_consec(pvo_series: pd.Series, thr: float = 0.0) -> pd.Series:
     result = pd.Series(0, index=pvo_series.index, dtype=float)
@@ -139,13 +139,10 @@ def _pvo_consec(pvo_series: pd.Series, thr: float = 0.0) -> pd.Series:
         result.iloc[i] = cnt
     return result
 
-
 def enrich_df(df: pd.DataFrame) -> pd.DataFrame:
-    """加入 V4/V12 所需全部技術指標（零 pandas_ta）"""
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
-    if len(df) < 20:
-        return df
+    if len(df) < 20: return df
     df["RSI"]        = _rsi(df["Close"])
     df["ATR"]        = _atr(df["High"], df["Low"], df["Close"])
     df["ADX"]        = _adx(df["High"], df["Low"], df["Close"])
@@ -164,60 +161,55 @@ def enrich_df(df: pd.DataFrame) -> pd.DataFrame:
     df["SlopeZ"] = (df["Slope"] - slope_mu) / slope_std
     return df
 
-
 # ══════════════════════════════════════════════════════════════
-# [FIX-2] yfinance 下載（Rate Limit 安全版）
+# yfinance 資料抓取（強力防禦 429 Rate Limit）
 # ══════════════════════════════════════════════════════════════
 
-def fetch_tw_ohlcv(sym: str, period: str = "60d", max_retries: int = 3):
-    """
-    .TW → .TWO fallback，遇 429 指數退讓重試。
-    回傳 (DataFrame, suffix) 或 (None, None)。
-    """
-    if yf is None:
-        return None, None
+def fetch_tw_ohlcv(sym: str, period: str = "60d", max_retries: int = 4):
+    """加入 Session 與更長的指數退讓，防禦 Yahoo 封鎖"""
+    if yf is None: return None, None
 
     for suffix in [".TW", ".TWO"]:
         ticker = f"{sym}{suffix}"
         for attempt in range(max_retries):
             try:
-                df = yf.download(ticker, period=period,
-                                 progress=False, auto_adjust=True, timeout=20)
+                # 傳入偽裝的 session
+                df = yf.download(ticker, period=period, progress=False, 
+                                 auto_adjust=True, timeout=20, session=_SESSION)
                 if isinstance(df.columns, pd.MultiIndex):
                     df.columns = df.columns.get_level_values(0)
                 df.columns = [str(c).strip() for c in df.columns]
+                
                 if not df.empty and len(df) >= 20:
                     return df, suffix
-                break
+                break # 無資料或資料太少，換下一個後綴
+                
             except Exception as e:
-                err = str(e)
-                if "Too Many Requests" in err or "429" in err or "Rate" in err:
-                    wait = (2 ** attempt) + random.uniform(1, 3)
-                    log.debug(f"  {ticker} rate-limit，等 {wait:.1f}s (第{attempt+1}次)")
+                err = str(e).lower()
+                if "too many requests" in err or "429" in err or "rate" in err:
+                    # 指數退讓：3, 9, 27秒 + 隨機數
+                    wait = (3 ** attempt) + random.uniform(3, 7)
+                    log.warning(f"  ⚠️ {ticker} 觸發 Rate Limit (429)，退讓等待 {wait:.1f} 秒 (第{attempt+1}/{max_retries}次)")
                     time.sleep(wait)
                 else:
-                    log.debug(f"  {ticker} 失敗: {e}")
+                    log.debug(f"  {ticker} 發生錯誤: {e}")
                     break
-
-    log.warning(f"⚠️  {sym} .TW/.TWO 均無資料，跳過")
+    
+    log.warning(f"⚠️ {sym} .TW/.TWO 均無資料或頻繁受阻，跳過")
     return None, None
-
 
 def load_from_csv(sym: str, day_dir: str):
     csv_path = os.path.join(day_dir, f"{sym}.csv")
-    if not os.path.exists(csv_path):
-        return None
+    if not os.path.exists(csv_path): return None
     try:
         df = pd.read_csv(csv_path, index_col=0, parse_dates=True)
         df.columns = [str(c).strip() for c in df.columns]
         return df if len(df) >= 20 else None
     except Exception as e:
-        log.debug(f"  {sym} CSV讀取失敗: {e}")
         return None
 
-
 # ══════════════════════════════════════════════════════════════
-# 工具
+# JSON 工具
 # ══════════════════════════════════════════════════════════════
 
 def save_json(path: str, data):
@@ -228,33 +220,21 @@ def save_json(path: str, data):
         json.dump(data, f, ensure_ascii=False, indent=2, default=str)
     log.info(f"✅ 儲存: {path}")
 
-
 def load_json(path: str):
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
             return json.load(f)
     return None
 
-
-def check_json(path: str, key: str, label: str) -> bool:
-    data = load_json(path)
-    if not data or not data.get(key):
-        log.warning(f"⚠️  【無資料】{label} '{key}' 為空：{path}")
-        return False
-    log.info(f"✅ 【資料正常】{label}：{len(data[key])} 筆")
-    return True
-
-
 # ══════════════════════════════════════════════════════════════
-# [FIX-4] Inline Engines: regime / feature / risk
+# Inline Engines: Regime / Feature / Risk
 # ══════════════════════════════════════════════════════════════
 
 class _RegimeEngine:
     SMOOTH = 0.7
-
     def run(self, market_data: dict, today: str) -> dict:
         try:
-            bm = yf.download("^TWII", period="180d", progress=False, auto_adjust=True)
+            bm = yf.download("^TWII", period="180d", progress=False, auto_adjust=True, session=_SESSION)
             if isinstance(bm.columns, pd.MultiIndex):
                 bm.columns = bm.columns.get_level_values(0)
             bm.columns = [str(c).strip() for c in bm.columns]
@@ -323,11 +303,10 @@ class _RegimeEngine:
         except Exception as e:
             log.error(f"❌ RegimeEngine 失敗: {e}"); return {}
 
-
 class _FeatureEngine:
     def run(self, today: str) -> dict:
         try:
-            bm = yf.download("^TWII", period="60d", progress=False, auto_adjust=True)
+            bm = yf.download("^TWII", period="60d", progress=False, auto_adjust=True, session=_SESSION)
             if isinstance(bm.columns, pd.MultiIndex):
                 bm.columns = bm.columns.get_level_values(0)
             bm.columns = [str(c).strip() for c in bm.columns]
@@ -348,7 +327,6 @@ class _FeatureEngine:
         except Exception as e:
             log.error(f"❌ FeatureEngine 失敗: {e}"); return {}
 
-
 class _RiskEngine:
     def summarize(self, positions: list) -> dict:
         if not positions:
@@ -362,14 +340,12 @@ class _RiskEngine:
             "exit_syms":  [p["symbol"] for p in exits],
         }
 
-
 _regime_engine  = _RegimeEngine()
 _feature_engine = _FeatureEngine()
 _risk_engine    = _RiskEngine()
 
-
 # ══════════════════════════════════════════════════════════════
-# [FIX-3] V4 引擎（內建，零 pandas_ta）
+# V4 引擎
 # ══════════════════════════════════════════════════════════════
 
 _POS_WEIGHT = {
@@ -377,7 +353,6 @@ _POS_WEIGHT = {
     "二合一(BC)": 0.23, "單一(A)":   0.18, "單一(B)":  0.18,
     "單一(C)":    0.18, "基準-強勢": 0.15, "基準-持有":0.13,
 }
-
 
 def _v4_signal(pvo, vri, slope_z, sc, mu, sigma, pvo_c, pvo_a, vri_d, vol_ratio):
     is_strong = sc > (mu + 0.5 * sigma)
@@ -407,7 +382,6 @@ def _v4_signal(pvo, vri, slope_z, sc, mu, sigma, pvo_c, pvo_a, vri_d, vol_ratio)
     if "B" in patterns and b_ok: sig_q = min(sig_q * 1.1, 1.5)
 
     return base + vtag, combo, sig_q
-
 
 def _v4_score(df, mu, sigma, rtype):
     if df is None or len(df) < 20: return None
@@ -443,7 +417,6 @@ def _v4_score(df, mu, sigma, rtype):
             "action":action,"signal":signal,"combo_key":combo,
             "close":round(close,1),"atr":round(atr,2),"pos_weight":pw}
 
-
 def run_v4(symbols, regime, today, day_dir) -> dict:
     label = regime.get("label","震盪")
     rtype = ("crash" if "熊" in label else "trend" if "牛" in label else
@@ -452,7 +425,8 @@ def run_v4(symbols, regime, today, day_dir) -> dict:
 
     rows = []; skipped = 0
     for i, sym in enumerate(symbols):
-        time.sleep(random.uniform(0.3, 0.7))
+        # 增加預設延遲，降低被 Yahoo 盯上的機率
+        time.sleep(random.uniform(0.8, 1.5))
         try:
             df = load_from_csv(sym, day_dir)
             if df is None: df, _ = fetch_tw_ohlcv(sym, "60d")
@@ -485,9 +459,8 @@ def run_v4(symbols, regime, today, day_dir) -> dict:
     return {"market":"TW","top20":top20,"pool_mu":am,"pool_sigma":as_,
             "win_rate":57.1,"regime":label,"total_scored":len(result_rows),"skipped":skipped}
 
-
 # ══════════════════════════════════════════════════════════════
-# [FIX-3] V12.1 引擎（內建，零 pandas_ta）
+# V12.1 引擎
 # ══════════════════════════════════════════════════════════════
 
 _PATH_DEFS = {
@@ -518,7 +491,6 @@ _ALL_Y_BETAS = {
 }
 _HIST_STATS = {"total_trades":112,"win_rate":57.1,"avg_ev":5.29,"max_dd":-6.58,
                "sharpe":5.36,"t_stat":4.032,"simple_cagr":96.9,"pl_ratio":2.31}
-
 
 def _v12_features(df) -> dict:
     if df is None or len(df) < 20: return {}
@@ -597,7 +569,6 @@ def _v12_features(df) -> dict:
     except Exception as e:
         log.warning(f"  v12特徵失敗: {e}"); return {}
 
-
 def _v12_y_pr(features):
     result = {}
     for yn, beta in _ALL_Y_BETAS.items():
@@ -606,7 +577,6 @@ def _v12_y_pr(features):
         result[f"s_{yn}"] = sc
         result[f"PR_{yn}"] = 95.0 if sc > 0 else 50.0
     return result
-
 
 def _v12_path(y_prs, Pb, Pr, Pu):
     PR_THR = 90.0
@@ -634,7 +604,6 @@ def _v12_path(y_prs, Pb, Pr, Pu):
         ev=Pb*pd_["ev_bear"]+Pr*pd_["ev_range"]+Pu*pd_["ev_bull"]
     return {"best":best,"batch":batch,"ev_soft":ev,"quality":"Pure"}
 
-
 def _v12_exit(old, ev_now, slope, days, curr_ret):
     if curr_ret <= -0.10: return "硬停損"
     if ev_now < 0.005:    return "EV衰退"
@@ -645,7 +614,6 @@ def _v12_exit(old, ev_now, slope, days, curr_ret):
         if drop > 0.35:                   return "時間衰減"
     if days > 3 and old.get("_pvo", 0.0) < -0.30: return "量能枯竭"
     return "—"
-
 
 def run_v12(symbols, regime, v4_data, today, day_dir) -> dict:
     label = regime.get("label","震盪")
@@ -665,18 +633,19 @@ def run_v12(symbols, regime, v4_data, today, day_dir) -> dict:
     positions=[]; path_counts={}
     for cand in cands[:12]:
         sym=cand["symbol"]
-        time.sleep(random.uniform(0.2,0.5))
+        # 增加預設延遲
+        time.sleep(random.uniform(0.8, 1.5))
         try:
             df=load_from_csv(sym,day_dir)
             if df is None: df,_=fetch_tw_ohlcv(sym,"90d")
-            if df is None or len(df)<20: log.warning(f"  V12 {sym} 不足"); continue
+            if df is None or len(df)<20: continue
 
             feats=_v12_features(df)
             if not feats: continue
-            if feats.get("_atr_regime",1.0)>2.5: log.debug(f"  {sym} ATR極端"); continue
+            if feats.get("_atr_regime",1.0)>2.5: continue
 
             slope_now=feats.get("_slope_5d",0.0)
-            if slope_now<0.0: log.debug(f"  {sym} Slope<0"); continue
+            if slope_now<0.0: continue
 
             y_prs=_v12_y_pr(feats)
             path_info=_v12_path(y_prs,Pb,Pr,Pu)
@@ -686,15 +655,15 @@ def run_v12(symbols, regime, v4_data, today, day_dir) -> dict:
             if best_path not in [a_p,b_p]: best_path=a_p or "423"
 
             ev_thr=ev_min*(1.20 if quality=="Flicker" else 1.0)
-            if ev_soft<ev_thr: log.debug(f"  {sym} EV不足"); continue
+            if ev_soft<ev_thr: continue
 
             max_same=max(1,round(max_pos*ratio.get(best_path,0.50)))
-            if path_counts.get(best_path,0)>=max_same: log.debug(f"  {sym} 槽滿"); continue
+            if path_counts.get(best_path,0)>=max_same: continue
 
             if len(positions)>=max_pos:
                 if positions:
                     min_ev=min(p.get("ev",0.0)/100 for p in positions)
-                    if ev_soft<min_ev*1.20: log.debug(f"  {sym} 換股EV不足"); continue
+                    if ev_soft<min_ev*1.20: continue
 
             last=df.iloc[-1]; close=float(last.get("Close",0))
             atr_raw=feats.get("_atr_pct",0.02)*close
@@ -734,9 +703,8 @@ def run_v12(symbols, regime, v4_data, today, day_dir) -> dict:
     return {"market":"TW","positions":positions,"stats":_HIST_STATS,"regime":rkey,
             "active_path":a_p,"backup_path":b_p,"path_counts":path_counts}
 
-
 # ══════════════════════════════════════════════════════════════
-# Pipeline Steps
+# Pipeline Steps & Main
 # ══════════════════════════════════════════════════════════════
 
 def step_market() -> dict:
@@ -749,137 +717,49 @@ def step_market() -> dict:
         log.error("❌ Market snapshot 失敗")
     return data or {}
 
-
 def step_regime(market_data: dict) -> dict:
-    log.info("=== Step 2: Regime Classification ===")
-    regime = _regime_engine.run(market_data=market_data, today=TODAY)
-    if regime:
-        save_json(os.path.join(REGIME_DIR, "regime_state.json"), regime)
-        log.info(f"Regime: {regime.get('label')} | 熊:{regime.get('bear',0)*100:.0f}% 牛:{regime.get('bull',0)*100:.0f}%")
+    log.info("=== Step 2: Regime Definition ===")
+    data = _regime_engine.run(market_data, today=TODAY)
+    if data:
+        save_json(os.path.join(REGIME_DIR, "regime_state.json"), data)
+        log.info(f"環境狀態: {data.get('label', '未知')} (牛:{data.get('bull',0):.2f} 熊:{data.get('bear',0):.2f})")
     else:
-        log.error("❌ Regime 失敗")
-    return regime or {}
-
-
-def step_save_daily_data(symbols: list) -> dict:
-    log.info("=== Step 2.5: Save Daily OHLCV ===")
-    day_dir = os.path.join(DATA_ROOT, TODAY)
-    os.makedirs(day_dir, exist_ok=True)
-    index_data = {}; failed = []
-
-    for i, sym in enumerate(symbols):
-        if i > 0 and i % 5 == 0:
-            time.sleep(random.uniform(2.0, 4.0))
-        else:
-            time.sleep(random.uniform(0.5, 1.2))
-
-        csv_path = os.path.join(day_dir, f"{sym}.csv")
-        if os.path.exists(csv_path):
-            try:
-                df_c = pd.read_csv(csv_path, index_col=0, parse_dates=True)
-                if len(df_c) >= 20:
-                    index_data[sym] = {"close": round(float(df_c.iloc[-1].get("Close",0)),2),
-                                       "rows": len(df_c), "cached": True}
-                    continue
-            except Exception: pass
-
-        df, suffix = fetch_tw_ohlcv(sym, period="90d")
-        if df is None: failed.append(sym); continue
-        df.to_csv(csv_path)
-        last = df.iloc[-1]
-        index_data[sym] = {"close": round(float(last.get("Close",0)),2),
-                           "volume": int(last.get("Volume",0)),"suffix":suffix,"rows":len(df)}
-
-    summary = {"date":TODAY,"total":len(symbols),"downloaded":len(index_data),
-               "failed":len(failed),"failed_symbols":failed}
-    with open(os.path.join(day_dir,"_index.json"),"w",encoding="utf-8") as f:
-        json.dump(summary,f,ensure_ascii=False,indent=2,default=str)
-
-    if failed:
-        log.warning(f"⚠️  失敗 {len(failed)} 檔：{failed[:10]}{'...' if len(failed)>10 else ''}")
-    log.info(f"✅ 存檔：{len(index_data)}/{len(symbols)} 檔 → {day_dir}")
-    return index_data
-
-
-def step_v4(regime: dict) -> dict:
-    log.info("=== Step 3: V4 Snapshot ===")
-    day_dir = os.path.join(DATA_ROOT, TODAY)
-    v4_data = run_v4(SYMBOLS, regime, TODAY, day_dir)
-    if v4_data:
-        save_json(os.path.join(V4_DIR, "v4_latest.json"), v4_data)
-        save_json(os.path.join(V4_DIR, f"v4_{TS}.json"),  v4_data)
-        check_json(os.path.join(V4_DIR, "v4_latest.json"), "top20", "V4 TOP20")
-    else:
-        log.error("❌ V4 失敗")
-    return v4_data or {}
-
-
-def step_v12(regime: dict, v4_data: dict) -> dict:
-    log.info("=== Step 4: V12.1 Snapshot ===")
-    day_dir  = os.path.join(DATA_ROOT, TODAY)
-    v12_data = run_v12(SYMBOLS, regime, v4_data, TODAY, day_dir)
-    if v12_data:
-        save_json(os.path.join(V12_DIR, "v12_latest.json"), v12_data)
-        save_json(os.path.join(V12_DIR, f"v12_{TS}.json"),  v12_data)
-        check_json(os.path.join(V12_DIR, "v12_latest.json"), "positions", "V12.1 部位")
-    else:
-        log.error("❌ V12.1 失敗")
-    return v12_data or {}
-
-
-def step_history(v12_data: dict):
-    log.info("=== Step 5: Trade History ===")
-    history_path = os.path.join(LOGS_DIR, "trade_history.json")
-    old_hist     = load_json(history_path) or []
-
-    new_exits = [
-        {"date":TODAY,"sym":p["symbol"],"action_type":"賣出",
-         "exit_type":p.get("exit_signal","—"),
-         "ret":round(p.get("curr_ret_pct",0)/100,4),
-         "path":p.get("path","—"),"year":datetime.now().year}
-        for p in v12_data.get("positions",[])
-        if p.get("exit_signal","—") not in ("—","無","持倉中")
-    ]
-
-    if new_exits:
-        old_hist.extend(new_exits); old_hist=old_hist[-500:]
-        with open(history_path,"w",encoding="utf-8") as f:
-            json.dump(old_hist,f,ensure_ascii=False,indent=2,default=str)
-        log.info(f"  新增 {len(new_exits)} 筆")
-    else:
-        log.info("  今日無出場記錄")
-
-    if old_hist:
-        log.info(f"✅ trade_history.json：{len(old_hist)} 筆")
-    else:
-        log.warning("⚠️  【無資料】trade_history.json 無記錄（等候出場信號，屬正常）")
-
-
-# ══════════════════════════════════════════════════════════════
-# Main
-# ══════════════════════════════════════════════════════════════
+        log.error("❌ Regime 定義失敗")
+    return data or {}
 
 def main():
-    log.info("=" * 60)
-    log.info(f"📅 資源法 daily_run.py v3.2 | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    log.info("=" * 60)
-
+    log.info(f"🚀 資源法 Daily Compute 啟動 [{TS}]")
+    
+    # ── Step 1: Market ──
     market_data = step_market()
+    
+    # ── Step 2: Regime ──
     regime_data = step_regime(market_data)
-    _           = step_save_daily_data(SYMBOLS)
-    v4_data     = step_v4(regime_data)
-    v12_data    = step_v12(regime_data, v4_data)
-    step_history(v12_data)
+    if not regime_data:
+        log.error("⚠️ 無法取得 Regime 資料，終止後續計算。")
+        sys.exit(1)
+        
+    # ── Step 3: V4 Engine ──
+    log.info("=== Step 3: V4 Engine ===")
+    v4_data = run_v4(SYMBOLS, regime_data, TODAY, DATA_ROOT)
+    if v4_data:
+        save_json(os.path.join(V4_DIR, "v4_latest.json"), v4_data)
+        
+    # ── Step 4: V12 Engine ──
+    log.info("=== Step 4: V12.1 Engine ===")
+    v12_data = run_v12(SYMBOLS, regime_data, v4_data, TODAY, DATA_ROOT)
+    if v12_data:
+        save_json(os.path.join(V12_DIR, "v12_latest.json"), v12_data)
+        
+        # ── Step 5: Risk Summary ──
+        if "positions" in v12_data:
+            risk_summary = _risk_engine.summarize(v12_data["positions"])
+            log.info(f"=== Step 5: Risk Summary ===")
+            log.info(f"總部位: {risk_summary['total_pos']} 檔 | 平均報酬: {risk_summary['avg_ret']}%")
+            if risk_summary['exit_count'] > 0:
+                log.info(f"⚠️ 建議出場: {risk_summary['exit_syms']}")
 
-    risk_sum = _risk_engine.summarize(v12_data.get("positions",[]))
-    log.info("=" * 60)
-    log.info("✅ 全部步驟完成")
-    log.info(f"  大盤:     {market_data.get('index_close',0):,.1f} ({market_data.get('index_chg_pct',0):+.2f}%)")
-    log.info(f"  Regime:   {regime_data.get('label','—')}")
-    log.info(f"  V4 TOP20: {len(v4_data.get('top20',[]))} 檔")
-    log.info(f"  V12.1:    {risk_sum['total_pos']} 個部位 | 出場警示:{risk_sum['exit_count']} 個")
-    log.info("=" * 60)
-
+    log.info("🎉 資源法 V12.1 今日運算全部完成！")
 
 if __name__ == "__main__":
     main()
