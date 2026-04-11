@@ -593,7 +593,7 @@ def _render_html(html_body: str, height: int = 400):
     components.html(full_html, height=height, scrolling=True)
 
 
-
+def _color_num(val, positive_good=True):
     if val is None: return "c-dim"
     if val > 0: return "c-green" if positive_good else "c-red"
     if val < 0: return "c-red" if positive_good else "c-green"
