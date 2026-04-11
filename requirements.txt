@@ -16,5 +16,4 @@ python-dotenv>=1.0.0
 
 # === Compute Layer（daily_run.py 專用） ===
 yfinance==0.2.48
-pandas-ta==0.3.14b0
 scipy>=1.13.0
