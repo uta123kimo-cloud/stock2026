@@ -38,10 +38,8 @@ try:
 except ImportError:
     yf = None
 
-try:
-    import pandas_ta as ta
-except ImportError:
-    ta = None
+# [FIX] pandas_ta 已移除 → 使用 v12_engine 內建純 numpy 特徵計算
+_USES_PANDAS_TA = False
 
 # ══════════════════════════════════════════════════════════════════
 # V12.1 核心參數（完整繼承自原始 V12.1）
@@ -255,7 +253,7 @@ def _compute_basic_features(df) -> dict:
         for i in range(1, n):
             tr = max(h[i]-l[i], abs(h[i]-c[i-1]), abs(l[i]-c[i-1]))
             atr[i] = tr
-        atr_s    = pd.Series(atr).ewm(com=13, adjust=False).mean().values
+        atr_s    = pd.Series(atr_a).ewm(com=13, adjust=False).mean().values
         atr_pct  = np.where(c > 0, atr_s / (c + 1e-9), 0.03)
         atr_mean = pd.Series(atr_pct).rolling(20).mean().values
         atr_reg  = np.where(atr_mean > 0, atr_pct / (atr_mean + 1e-9), 1.0)
