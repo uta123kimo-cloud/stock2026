@@ -246,7 +246,22 @@ def step_v4(eng, regime: dict) -> dict:
     "1711","1727","2404","2489","3060","3374","3498","3535","3580","3587","3665","4749","4989","6187","6217","6290","6418","6443","6470","6542","6546","6706","6831","6861","6877","8028","8111"
 
     ]
+ def get_taiwan_symbol(symbol):
+    """修正版：自動偵測上市 (.TW) 或上櫃 (.TWO)，避免 8096 報錯"""
+    s = str(symbol).replace('$', '').strip()
+    if not s.isdigit(): return s
 
+    # 使用 Ticker 檢查取代 download，避免產生 HTTP 404 報錯中斷
+    for suffix in [".TW", ".TWO"]:
+        target = f"{s}{suffix}"
+        try:
+            t = yf.Ticker(target)
+            if not t.history(period="1d").empty:
+                return target
+        except:
+            continue
+    return f"{s}.TW"
+     
     try:
         if eng and hasattr(eng, "run"):
             v4_data = eng.run(symbols=SYMBOLS, regime=regime, today=TODAY)
@@ -380,7 +395,22 @@ def step_v12(eng, regime: dict, v4_data: dict) -> dict:
     "1711","1727","2404","2489","3060","3374","3498","3535","3580","3587","3665","4749","4989","6187","6217","6290","6418","6443","6470","6542","6546","6706","6831","6861","6877","8028","8111"
 
     ]
+    
+def get_taiwan_symbol(symbol):
+    """修正版：自動偵測上市 (.TW) 或上櫃 (.TWO)，避免 8096 報錯"""
+    s = str(symbol).replace('$', '').strip()
+    if not s.isdigit(): return s
 
+    # 使用 Ticker 檢查取代 download，避免產生 HTTP 404 報錯中斷
+    for suffix in [".TW", ".TWO"]:
+        target = f"{s}{suffix}"
+        try:
+            t = yf.Ticker(target)
+            if not t.history(period="1d").empty:
+                return target
+        except:
+            continue
+    return f"{s}.TW"
     try:
         if eng and hasattr(eng, "run"):
             v12_data = eng.run(symbols=SYMBOLS_V12, regime=regime, v4_snapshot=v4_data, today=TODAY)
