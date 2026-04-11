@@ -36,7 +36,6 @@ _ENV_GEMINI_KEY = _get_secret("GEMINI_API_KEY")
 # ──────────────────────────────────────────────────────────────
 # GitHub 資料源設定（修改為你的 repo）
 # ──────────────────────────────────────────────────────────────
-GITHUB_RAW = "https://raw.githubusercontent.com/{owner}/{repo}/main/storage"
 GITHUB_OWNER = _get_secret("GITHUB_OWNER", "your-username")
 GITHUB_REPO  = _get_secret("GITHUB_REPO",  "quant-storage")
 BASE_URL     = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/main/storage"
