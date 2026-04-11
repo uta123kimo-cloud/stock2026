@@ -22,8 +22,8 @@ on:
     #20:50 台灣 = 12:55 UTC（日結存檔）
     - cron: "55 12 * * 1-6"
     
-     workflow_dispatch:
-     - cron: "55 12 * * 1-6"
+  workflow_dispatch:
+    - cron: "55 12 * * 1-6"
      
 
 
