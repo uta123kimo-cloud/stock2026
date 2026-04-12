@@ -1,11 +1,11 @@
 {
-  "bear": 0.244,
-  "range": 0.2843,
-  "bull": 0.4717,
-  "label": "偏多震盪",
-  "active_strategy": "range",
-  "active_path": "423",
-  "backup_path": "45",
+  "bear": 0.1838,
+  "range": 0.2453,
+  "bull": 0.5709,
+  "label": "牛市",
+  "active_strategy": "bull",
+  "active_path": "45",
+  "backup_path": "423",
   "slope_5d": 0.0696,
   "slope_20d": 0.033,
   "mkt_rsi": 63.0,
@@ -20,6 +20,6 @@
     }
   ],
   "data_source": "ETF_composite_0050_006208",
-  "generated_at": "2026-04-12 13:47",
+  "generated_at": "2026-04-12 20:22",
   "date": "2026-04-12"
 }

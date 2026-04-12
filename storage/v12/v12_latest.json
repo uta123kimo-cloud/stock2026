@@ -2,39 +2,57 @@
   "market": "TW",
   "positions": [
     {
-      "symbol": "4966",
+      "symbol": "5469",
       "path": "45",
-      "ev": 3.47,
+      "ev": 3.7,
       "ev_tier": "🔥主力",
       "action": "進場",
       "exit_signal": "—",
       "quality": "Pure",
       "days_held": 0,
       "curr_ret_pct": 0.0,
-      "entry_price": 533.0,
-      "tp1_price": 639.6,
-      "tp2_price": 682.2,
-      "stop_price": 505.2,
-      "regime": "range",
-      "close": 533.0,
-      "batch": 1
+      "entry_price": 90.1,
+      "tp1_price": 108.1,
+      "tp2_price": 115.3,
+      "stop_price": 84.3,
+      "regime": "bull",
+      "close": 90.1,
+      "batch": 2
     },
     {
       "symbol": "2382",
       "path": "45",
-      "ev": 3.47,
+      "ev": 3.7,
       "ev_tier": "🔥主力",
-      "action": "進場",
+      "action": "持有",
       "exit_signal": "—",
       "quality": "Pure",
-      "days_held": 0,
+      "days_held": 1,
       "curr_ret_pct": 0.0,
       "entry_price": 321.5,
       "tp1_price": 385.8,
       "tp2_price": 411.5,
       "stop_price": 307.1,
-      "regime": "range",
+      "regime": "bull",
       "close": 321.5,
+      "batch": 1
+    },
+    {
+      "symbol": "6285",
+      "path": "45",
+      "ev": 3.7,
+      "ev_tier": "🔥主力",
+      "action": "進場",
+      "exit_signal": "—",
+      "quality": "Pure",
+      "days_held": 0,
+      "curr_ret_pct": 0.0,
+      "entry_price": 225.5,
+      "tp1_price": 270.6,
+      "tp2_price": 288.6,
+      "stop_price": 205.2,
+      "regime": "bull",
+      "close": 225.5,
       "batch": 1
     }
   ],
@@ -48,12 +66,12 @@
     "simple_cagr": 96.9,
     "pl_ratio": 2.31
   },
-  "regime": "range",
-  "active_path": "423",
-  "backup_path": "45",
+  "regime": "bull",
+  "active_path": "45",
+  "backup_path": "423",
   "path_counts": {
-    "45": 2
+    "45": 3
   },
-  "generated_at": "2026-04-12 13:48",
+  "generated_at": "2026-04-12 20:26",
   "date": "2026-04-12"
 }
