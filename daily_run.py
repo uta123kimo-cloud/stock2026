@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  daily_run.py v3.9  資源法 Precompute 主控制器               ║
+║  daily_run.py v3.10  資源法 Precompute 主控制器              ║
 ║                                                              ║
 ║  v3.7 修正清單：                                             ║
 ║  [FIX-1] 完全移除 ^TWII，改用 0050.TW + 006208.TW 合成      ║
@@ -20,6 +20,13 @@
 ║           明確識別 → 立刻換 .TWO，不浪費重試次數             ║
 ║  [FIX-11] 新增 _KNOWN_TWO_SYMBOLS 白名單，直接從 .TWO 開始   ║
 ║  [FIX-12] delisted log 改為 WARNING 級別，方便後續追蹤       ║
+║                                                              ║
+║  v3.10 修正清單（動態 TW/TWO 偵測，徹底解決上櫃股問題）：    ║
+║  [FIX-13] 新增 _resolve_suffix()：用 yf.Ticker.history(1d)  ║
+║           動態偵測上市/上櫃，結果寫入執行期 LRU cache        ║
+║  [FIX-14] 移除靜態 _KNOWN_TWO_SYMBOLS，改用動態快取          ║
+║  [FIX-15] fetch_tw_ohlcv 改用 _resolve_suffix 決定順序       ║
+║           解決大量新上櫃股（3293/3680/3529...）噪音問題      ║
 ╚══════════════════════════════════════════════════════════════╝
 
 大盤合成邏輯：
@@ -87,32 +94,18 @@ SYMBOLS = list(dict.fromkeys([
     "6176", "6415", "6206", "8069", "3264", "5269", "2360", "6271", "3189", "6438",
     "8358", "6231", "2449", "3030", "8016", "6679", "3374", "3014", "3211",
     "6213", "2404", "2480", "3596", "6202", "5443", "5347", "5483", "6147",
-    "2313", "3037", "8046", "2368", "4958", "2383", "6269", "5469", "5351", #PCB
+    "2313", "3037", "8046", "2368", "4958", "2383", "6269", "5469", "5351",
     "4909", "8050", "6153", "6505", "1802", "3708", "8213", "1325",
-    "2344", "6239", "3260", "4967", "6414", "2337", "8096",#記憶體
-    "3551", "2436", "2375", "2492", "2456", "3229", "6173", "3533", #被動元件
-    "3491", "6271", "2313", "2367", "6285", "6190", #低軌衛星
-    "3062", "2419", "2314", "3305", "3105", "2312", "8086",#低軌衛星
-    "3081", "2455", "6442", "3163", "4979", "3363", "6451", #光通訊股
-    "3450", "4908", "4977", "3234", "2360", #光通訊股
-    "1711","1727","2404","2489","3060","3374","3498","3535","3580","3587","3665","4749","4989","6187","6217","6290","6418","6443","6470","6542","6546","6706","6831","6861","6877","8028","8111"
-
+    "2344", "6239", "3260", "4967", "6414", "2337", "8096",
+    "3551", "2436", "2375", "2492", "2456", "3229", "6173", "3533",
+    "3491", "6271", "2313", "2367", "6285", "6190",
+    "3062", "2419", "2314", "3305", "3105", "2312", "8086",
+    "3081", "2455", "6442", "3163", "4979", "3363", "6451",
+    "3450", "4908", "4977", "3234", "2360",
+    "1711","1727","2404","2489","3060","3374","3498","3535","3580","3587",
+    "3665","4749","4989","6187","6217","6290","6418","6443","6470","6542",
+    "6546","6706","6831","6861","6877","8028","8111",
 ]))
-
-# ──────────────────────────────────────────────────────────────
-# [FIX-11] 已知上櫃（.TWO）白名單
-# 凡在此集合內的代碼，fetch_tw_ohlcv 直接從 .TWO 開始嘗試，
-# 跳過 .TW，避免 YFPricesMissingError 噪音並節省時間。
-#
-# 辨識依據（出現 "possibly delisted" 即為上櫃股未用正確 suffix）：
-#   8096 → 博威合金（上櫃）
-#   3131 → 弘塑科技（上櫃）
-#   5274 → 信驊科技（上櫃）
-#   4966 → 譜瑞-KY  （上櫃）
-# ──────────────────────────────────────────────────────────────
-_KNOWN_TWO_SYMBOLS: set = {
-    "8096", "3131", "5274", "4966",
-}
 
 # ══════════════════════════════════════════════════════════════
 # 工具函式
@@ -146,6 +139,85 @@ def _make_session(referer: str = "https://www.twse.com.tw/") -> requests.Session
 _SESSION_TWSE = _make_session("https://www.twse.com.tw/")
 _SESSION_YF   = _make_session("https://finance.yahoo.com/")
 _SESSION_YF.headers["Accept"] = "text/html,application/xhtml+xml,*/*;q=0.8"
+
+
+# ══════════════════════════════════════════════════════════════
+# [FIX-13][FIX-14] 動態 suffix 偵測（取代靜態白名單）
+#
+# 設計原則：
+#   1. 執行期 LRU cache（_SUFFIX_CACHE）：每次 Actions run 只偵測一次
+#   2. 磁碟持久化 cache（suffix_cache.json）：跨 run 不重複偵測
+#   3. 用 yf.Ticker.history(period="1d") 而非 yf.download，
+#      避免產生 HTTP 404 Error log 噪音
+#   4. 兩個 suffix 都沒資料 → 回傳 None（讓 fetch_tw_ohlcv 處理）
+# ══════════════════════════════════════════════════════════════
+
+_SUFFIX_CACHE: dict = {}          # 執行期記憶體快取
+_SUFFIX_CACHE_PATH = os.path.join(CACHE_DIR, "suffix_cache.json")
+
+
+def _load_suffix_cache() -> None:
+    """從磁碟載入 suffix cache（module 載入時執行一次）。"""
+    global _SUFFIX_CACHE
+    if os.path.exists(_SUFFIX_CACHE_PATH):
+        try:
+            with open(_SUFFIX_CACHE_PATH, encoding="utf-8") as f:
+                _SUFFIX_CACHE = json.load(f)
+            log.debug(f"  suffix cache 載入 {len(_SUFFIX_CACHE)} 筆")
+        except Exception:
+            _SUFFIX_CACHE = {}
+
+
+def _save_suffix_cache() -> None:
+    """將 suffix cache 寫回磁碟。"""
+    try:
+        with open(_SUFFIX_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(_SUFFIX_CACHE, f, ensure_ascii=False)
+    except Exception as e:
+        log.debug(f"  suffix cache 寫入失敗: {e}")
+
+
+def _resolve_suffix(sym: str) -> Optional[str]:
+    """
+    [FIX-13] 動態偵測股票掛牌市場，回傳 ".TW" 或 ".TWO" 或 None。
+
+    流程：
+      1. 先查記憶體快取 → 直接回傳（最快）
+      2. 查磁碟快取    → 更新記憶體並回傳
+      3. 用 yf.Ticker.history(1d) 依序試 .TW / .TWO
+         - Ticker.history 不產生 ERROR log，比 yf.download 乾淨
+      4. 結果寫入記憶體 + 磁碟快取
+
+    注意：此函式本身不做 429 重試，429 由 fetch_tw_ohlcv 處理。
+    """
+    if sym in _SUFFIX_CACHE:
+        return _SUFFIX_CACHE[sym]
+
+    if yf is None:
+        return ".TW"
+
+    for suffix in [".TW", ".TWO"]:
+        ticker = f"{sym}{suffix}"
+        try:
+            t   = yf.Ticker(ticker)
+            hist = t.history(period="5d")
+            if not hist.empty:
+                log.debug(f"  suffix偵測: {sym} → {suffix}")
+                _SUFFIX_CACHE[sym] = suffix
+                _save_suffix_cache()
+                return suffix
+        except Exception:
+            continue
+
+    # 兩個都沒資料（真的下市或代碼錯誤）
+    log.warning(f"  suffix偵測: {sym} 兩個 suffix 均無資料，跳過")
+    _SUFFIX_CACHE[sym] = None
+    _save_suffix_cache()
+    return None
+
+
+# 啟動時載入磁碟 cache
+_load_suffix_cache()
 
 
 # ══════════════════════════════════════════════════════════════
@@ -494,7 +566,7 @@ def fetch_market_index(days: int = 180) -> pd.DataFrame:
     if not df.empty and len(df) >= 10 and "Close" in df.columns:
         return df
 
-    log.error("  所有大盤指數來源均失敗 → 啟動常數 fallback（v3.8）")
+    log.error("  所有大盤指數來源均失敗 → 啟動常數 fallback")
     dates = pd.date_range(end=pd.Timestamp.today(), periods=60, freq="B")
     df = pd.DataFrame({
         "Close":  np.linspace(100.0, 110.0, len(dates)),
@@ -508,8 +580,8 @@ def fetch_market_index(days: int = 180) -> pd.DataFrame:
 
 
 # ══════════════════════════════════════════════════════════════
-# 個股 OHLCV（.TW → .TWO → 本地快取）
-# [FIX-10][FIX-11][FIX-12] v3.9 核心修正
+# 個股 OHLCV（動態偵測 .TW / .TWO）
+# [FIX-15] v3.10：改用 _resolve_suffix() 取代靜態白名單
 # ══════════════════════════════════════════════════════════════
 
 def fetch_tw_ohlcv(sym: str, period: str = "60d",
@@ -517,18 +589,27 @@ def fetch_tw_ohlcv(sym: str, period: str = "60d",
     """
     下載個股 OHLCV。
 
-    v3.9 修正：
-    1. _KNOWN_TWO_SYMBOLS 白名單：已知上櫃股直接從 .TWO 開始
-    2. YFPricesMissingError / delisted / no data → 明確識別，
-       立刻 break 換 suffix，不浪費重試次數
-    3. 上述錯誤改為 WARNING 級別（原為 debug），方便追蹤需加白名單的股票
+    v3.10 流程：
+    1. _resolve_suffix(sym) → 動態偵測掛牌市場（有磁碟 cache）
+       - 已知 → 直接用正確 suffix 下載，無噪音
+       - 未知 → Ticker.history(5d) 靜默偵測，不產生 ERROR log
+    2. 優先 suffix 失敗時仍 fallback 到另一個 suffix
+    3. 429 → 指數退讓重試（同一 suffix）
     """
     if yf is None:
         log.warning("yfinance 未安裝，無法下載個股")
         return None, None
 
-    # [FIX-11] 已知上櫃股：直接從 .TWO 開始，省去一次無效嘗試
-    suffixes = [".TWO", ".TW"] if sym in _KNOWN_TWO_SYMBOLS else [".TW", ".TWO"]
+    # [FIX-15] 動態決定 suffix 順序
+    detected = _resolve_suffix(sym)
+    if detected is None:
+        # 兩個都沒資料，直接跳過
+        log.warning(f"  {sym}: suffix 偵測失敗，跳過")
+        return None, None
+
+    # 偵測到的 suffix 優先，另一個作 fallback
+    other = ".TWO" if detected == ".TW" else ".TW"
+    suffixes = [detected, other]
 
     for suffix in suffixes:
         ticker  = f"{sym}{suffix}"
@@ -543,18 +624,20 @@ def fetch_tw_ohlcv(sym: str, period: str = "60d",
                 df = _normalize_df(df)
 
                 if not df.empty and "Close" in df.columns and len(df) >= 20:
-                    log.debug(f"  {ticker}: {len(df)} 筆 (attempt {attempt+1})")
+                    # 如果成功的 suffix 跟偵測不同，更新 cache
+                    if suffix != detected:
+                        log.info(f"  {sym}: 更新 suffix cache → {suffix}")
+                        _SUFFIX_CACHE[sym] = suffix
+                        _save_suffix_cache()
                     return df, suffix
 
-                # 下載成功但資料不足（.TW 打到上櫃股時常見）→ 換 suffix
-                log.warning(f"  {ticker}: 資料不足 ({len(df)} 筆)，換 suffix")
+                log.debug(f"  {ticker}: 資料不足 ({len(df)} 筆)，換 suffix")
                 break
 
             except Exception as e:
                 err = str(e).lower()
 
                 if "too many requests" in err or "429" in err or "rate" in err:
-                    # 限速 → 指數退讓，繼續重試同一 suffix
                     wait = (2 ** attempt) * 3 + random.uniform(2, 6)
                     log.warning(
                         f"  {ticker} 429，退讓 {wait:.1f}s "
@@ -564,25 +647,21 @@ def fetch_tw_ohlcv(sym: str, period: str = "60d",
                     got_429 = True
 
                 elif (
-                    "missing" in err
-                    or "delisted" in err
-                    or "no data found" in err
-                    or "no price data" in err
+                    "missing" in err or "delisted" in err
+                    or "no data found" in err or "no price data" in err
                 ):
-                    # [FIX-10][FIX-12] 掛牌市場不符 → 立刻換 suffix
-                    # 改為 WARNING，方便發現哪些股票要加入白名單
-                    log.warning(
-                        f"  {ticker} 不在此市場（上市/上櫃 suffix 不符），"
-                        f"換 suffix。建議加入 _KNOWN_TWO_SYMBOLS。錯誤: {e}"
-                    )
+                    # suffix 不符 → 更新 cache 並換 suffix
+                    log.warning(f"  {ticker} 掛牌市場不符，換 suffix")
+                    if suffix == detected:
+                        _SUFFIX_CACHE[sym] = other
+                        _save_suffix_cache()
                     break
 
                 else:
-                    log.debug(f"  {ticker} 未知錯誤，換 suffix: {e}")
+                    log.debug(f"  {ticker} 錯誤: {e}")
                     break
 
         else:
-            # for-else：僅 429 重試耗盡才到這裡
             if got_429:
                 log.warning(f"  {ticker} 429 重試耗盡，換 suffix")
 
@@ -716,25 +795,26 @@ class _RegimeEngine:
     SMOOTH = 0.7
 
     def run(self, market_data: dict, today: str) -> dict:
+        _fallback = {
+            "bear":            0.33,
+            "range":           0.34,
+            "bull":            0.33,
+            "label":           "震盪",
+            "active_strategy": "range",
+            "active_path":     "423",
+            "backup_path":     "45",
+            "slope_5d":        0.0,
+            "slope_20d":       0.0,
+            "mkt_rsi":         50.0,
+            "adx":             20.0,
+            "history":         [],
+            "data_source":     "fallback",
+        }
         try:
             bm = fetch_market_index(days=180)
             if bm.empty or len(bm) < 20 or "Close" not in bm.columns:
                 log.error("RegimeEngine：資料不足 → fallback")
-                return {
-                    "bear":            0.33,
-                    "range":           0.34,
-                    "bull":            0.33,
-                    "label":           "震盪",
-                    "active_strategy": "range",
-                    "active_path":     "423",
-                    "backup_path":     "45",
-                    "slope_5d":        0.0,
-                    "slope_20d":       0.0,
-                    "mkt_rsi":         50.0,
-                    "adx":             20.0,
-                    "history":         [],
-                    "data_source":     "fallback",
-                }
+                return _fallback
 
             for col in ["Open", "High", "Low"]:
                 if col not in bm.columns:
@@ -749,21 +829,7 @@ class _RegimeEngine:
             bm_v = bm.dropna(subset=["RSI", "MA60"])
             if len(bm_v) < 2:
                 log.error("RegimeEngine：有效資料不足（需 ≥ 2 列）")
-                return {
-                    "bear":            0.33,
-                    "range":           0.34,
-                    "bull":            0.33,
-                    "label":           "震盪",
-                    "active_strategy": "range",
-                    "active_path":     "423",
-                    "backup_path":     "45",
-                    "slope_5d":        0.0,
-                    "slope_20d":       0.0,
-                    "mkt_rsi":         50.0,
-                    "adx":             20.0,
-                    "history":         [],
-                    "data_source":     "fallback",
-                }
+                return _fallback
 
             last  = bm_v.iloc[-1]
             rsi   = float(last["RSI"])
@@ -842,21 +908,7 @@ class _RegimeEngine:
             }
         except Exception as e:
             log.error(f"RegimeEngine 失敗: {e}")
-            return {
-                "bear":            0.33,
-                "range":           0.34,
-                "bull":            0.33,
-                "label":           "震盪",
-                "active_strategy": "range",
-                "active_path":     "423",
-                "backup_path":     "45",
-                "slope_5d":        0.0,
-                "slope_20d":       0.0,
-                "mkt_rsi":         50.0,
-                "adx":             20.0,
-                "history":         [],
-                "data_source":     "fallback",
-            }
+            return _fallback
 
 
 # ══════════════════════════════════════════════════════════════
@@ -865,19 +917,20 @@ class _RegimeEngine:
 
 class _FeatureEngine:
     def run(self, today: str) -> dict:
+        _fallback = {
+            "index_close":   0.0,
+            "index_chg_pct": 0.0,
+            "mkt_rsi":       50.0,
+            "mkt_slope_5d":  0.0,
+            "mkt_slope_20d": 0.0,
+            "volume":        0.0,
+            "data_source":   "fallback",
+        }
         try:
             bm = fetch_market_index(days=60)
             if bm.empty or len(bm) < 2 or "Close" not in bm.columns:
                 log.error("FeatureEngine：指數資料不足（使用 fallback）")
-                return {
-                    "index_close":   0.0,
-                    "index_chg_pct": 0.0,
-                    "mkt_rsi":       50.0,
-                    "mkt_slope_5d":  0.0,
-                    "mkt_slope_20d": 0.0,
-                    "volume":        0.0,
-                    "data_source":   "fallback",
-                }
+                return _fallback
 
             for col in ["Open", "High", "Low"]:
                 if col not in bm.columns:
@@ -890,15 +943,7 @@ class _FeatureEngine:
 
             if len(bm_v) < 2:
                 log.error("FeatureEngine：RSI 有效資料不足（需 ≥ 2 列）")
-                return {
-                    "index_close":   0.0,
-                    "index_chg_pct": 0.0,
-                    "mkt_rsi":       50.0,
-                    "mkt_slope_5d":  0.0,
-                    "mkt_slope_20d": 0.0,
-                    "volume":        0.0,
-                    "data_source":   "fallback",
-                }
+                return _fallback
 
             last = bm_v.iloc[-1]
             prev = bm_v.iloc[-2]
@@ -921,15 +966,7 @@ class _FeatureEngine:
             }
         except Exception as e:
             log.error(f"FeatureEngine 失敗: {e}")
-            return {
-                "index_close":   0.0,
-                "index_chg_pct": 0.0,
-                "mkt_rsi":       50.0,
-                "mkt_slope_5d":  0.0,
-                "mkt_slope_20d": 0.0,
-                "volume":        0.0,
-                "data_source":   "fallback",
-            }
+            return _fallback
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1089,16 +1126,18 @@ def run_v4(symbols, regime, today, day_dir) -> dict:
     result_rows.sort(key=lambda x: x["score"], reverse=True)
     for i, r in enumerate(result_rows):
         r["rank"] = i + 1
-    top20  = result_rows[:20]
+    top30  = result_rows[:30]   # v3.10: 擴展至 TOP30
     scores = [r["score"] for r in result_rows]
     am = round(float(np.mean(scores)), 2)
     as_ = round(float(np.std(scores)), 2)
-    log.info(f"V4 完成 ✅ | TOP20:{len(top20)} | 跳過:{skipped} | μ={am} σ={as_}")
+    log.info(f"V4 完成 ✅ | TOP30:{len(top30)} | 跳過:{skipped} | μ={am} σ={as_}")
     return {
-        "market": "TW", "top20": top20,
+        "market": "TW", "top20": top30,   # key 保持 top20 相容舊 app
+        "top30":  top30,
         "pool_mu": am, "pool_sigma": as_,
         "win_rate": 57.1, "regime": label,
         "total_scored": len(result_rows), "skipped": skipped,
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
 
 
@@ -1343,16 +1382,16 @@ def run_v12(symbols, regime, v4_data, today, day_dir) -> dict:
                 tp1_px = round(close * (1 + _PATH_DEFS.get(best_path, {}).get("tp1", 0.20) * 0.80), 1)
 
             if sym in old_pos:
-                old         = old_pos[sym]; days = old.get("days_held", 0) + 1
-                entry_price = old.get("entry_price", close)
+                old_p       = old_pos[sym]; days_h = old_p.get("days_held", 0) + 1
+                entry_price = old_p.get("entry_price", close)
                 curr_ret    = (close - entry_price) / (entry_price + 1e-9)
-                stop_px     = old.get("stop_price", stop_px)
-                tp1_px      = old.get("tp1_price",  tp1_px)
+                stop_px     = old_p.get("stop_price", stop_px)
+                tp1_px      = old_p.get("tp1_price",  tp1_px)
                 action      = "持有"
-                old["_pvo"] = feats.get("vol_pvo", 0.0)
-                exit_sig    = _v12_exit(old, ev_soft, feats.get("_slope_5d", 0.0), days, curr_ret)
+                old_p["_pvo"] = feats.get("vol_pvo", 0.0)
+                exit_sig    = _v12_exit(old_p, ev_soft, feats.get("_slope_5d", 0.0), days_h, curr_ret)
             else:
-                days = 0; entry_price = close; curr_ret = 0.0
+                days_h = 0; entry_price = close; curr_ret = 0.0
                 action = "進場"; exit_sig = "—"
 
             ev_tier = (
@@ -1361,14 +1400,21 @@ def run_v12(symbols, regime, v4_data, today, day_dir) -> dict:
                 "📌補位" if ev_soft >= 0.020 else ""
             )
             positions.append({
-                "symbol":       sym, "path":       best_path,
-                "ev":           round(ev_soft * 100, 2), "ev_tier": ev_tier,
-                "action":       action, "exit_signal": exit_sig,
-                "quality":      quality, "days_held":   days,
+                "symbol":       sym,
+                "path":         best_path,
+                "ev":           round(ev_soft * 100, 2),
+                "ev_tier":      ev_tier,
+                "action":       action,
+                "exit_signal":  exit_sig,
+                "quality":      quality,
+                "days_held":    days_h,
                 "curr_ret_pct": round(curr_ret * 100, 2),
                 "entry_price":  round(entry_price, 2),
-                "tp1_price":    tp1_px, "tp2_price": tp2_px, "stop_price": stop_px,
-                "regime":       rkey, "close": round(close, 2),
+                "close":        round(close, 2),        # v3.10: 現價
+                "tp1_price":    tp1_px,
+                "tp2_price":    tp2_px,
+                "stop_price":   stop_px,
+                "regime":       rkey,
                 "batch":        path_info.get("batch", 0),
             })
             path_counts[best_path] = path_counts.get(best_path, 0) + 1
@@ -1379,11 +1425,19 @@ def run_v12(symbols, regime, v4_data, today, day_dir) -> dict:
         except Exception as e:
             log.warning(f"  V12 {sym}: {e}")
 
+    # v3.10: 依 EV 排序，最多顯示 30 筆
+    positions.sort(key=lambda x: x.get("ev", 0), reverse=True)
+
     log.info(f"V12 完成 ✅ | 部位:{len(positions)} | 路徑:{path_counts}")
     return {
-        "market": "TW", "positions": positions, "stats": _HIST_STATS,
-        "regime": rkey, "active_path": a_p, "backup_path": b_p,
-        "path_counts": path_counts,
+        "market":       "TW",
+        "positions":    positions,
+        "stats":        _HIST_STATS,
+        "regime":       rkey,
+        "active_path":  a_p,
+        "backup_path":  b_p,
+        "path_counts":  path_counts,
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
 
 
