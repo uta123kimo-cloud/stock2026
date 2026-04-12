@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  daily_run.py v3.8  資源法 Precompute 主控制器               ║
+║  daily_run.py v3.9  資源法 Precompute 主控制器               ║
 ║                                                              ║
 ║  v3.7 修正清單：                                             ║
 ║  [FIX-1] 完全移除 ^TWII，改用 0050.TW + 006208.TW 合成      ║
@@ -14,6 +14,12 @@
 ║  [FIX-7] FeatureEngine：空欄檢查 + fallback 回傳，不 crash   ║
 ║  [FIX-8] RegimeEngine：空欄檢查 + fallback 回傳，不 crash    ║
 ║  [FIX-9] main()：Regime fallback 不再 sys.exit(1)            ║
+║                                                              ║
+║  v3.9 修正清單（上櫃股 .TWO 自動識別）：                     ║
+║  [FIX-10] fetch_tw_ohlcv：YFPricesMissingError/delisted      ║
+║           明確識別 → 立刻換 .TWO，不浪費重試次數             ║
+║  [FIX-11] 新增 _KNOWN_TWO_SYMBOLS 白名單，直接從 .TWO 開始   ║
+║  [FIX-12] delisted log 改為 WARNING 級別，方便後續追蹤       ║
 ╚══════════════════════════════════════════════════════════════╝
 
 大盤合成邏輯：
@@ -72,10 +78,41 @@ for _d in [V4_DIR, V12_DIR, REGIME_DIR, MARKET_DIR, LOGS_DIR, DATA_ROOT, CACHE_D
 # 股票池
 # ──────────────────────────────────────────────────────────────
 SYMBOLS = list(dict.fromkeys([
-    "2330","2317","2454","2308","2382","2303","3711","2412","2357","3231",
-    "3030","3706","8096","2313","4958","6669","3008","2379","3443","3661",
-    "6415","3035","2408","3131","5274","2395","2345","2382","4966","3034",
+    "3030", "3706", "8096", "2313", "4958",
+    "2330", "2317", "2454", "2308", "2382", "2303", "3711", "2412", "2357", "3231",
+    "2379", "3008", "2395", "3045", "2327", "2408", "2377", "6669", "2301", "3034",
+    "2345", "2474", "3037", "4938", "3443", "2353", "2324", "2603", "2609", "1513",
+    "3293", "3680", "3529", "3131", "5274", "6223", "6805", "3017", "3324", "6515",
+    "3661", "3583", "6139", "3035", "1560", "8299", "3558", "6187", "3406", "3217",
+    "6176", "6415", "6206", "8069", "3264", "5269", "2360", "6271", "3189", "6438",
+    "8358", "6231", "2449", "3030", "8016", "6679", "3374", "3014", "3211",
+    "6213", "2404", "2480", "3596", "6202", "5443", "5347", "5483", "6147",
+    "2313", "3037", "8046", "2368", "4958", "2383", "6269", "5469", "5351", #PCB
+    "4909", "8050", "6153", "6505", "1802", "3708", "8213", "1325",
+    "2344", "6239", "3260", "4967", "6414", "2337", "8096",#記憶體
+    "3551", "2436", "2375", "2492", "2456", "3229", "6173", "3533", #被動元件
+    "3491", "6271", "2313", "2367", "6285", "6190", #低軌衛星
+    "3062", "2419", "2314", "3305", "3105", "2312", "8086",#低軌衛星
+    "3081", "2455", "6442", "3163", "4979", "3363", "6451", #光通訊股
+    "3450", "4908", "4977", "3234", "2360", #光通訊股
+    "1711","1727","2404","2489","3060","3374","3498","3535","3580","3587","3665","4749","4989","6187","6217","6290","6418","6443","6470","6542","6546","6706","6831","6861","6877","8028","8111"
+
 ]))
+
+# ──────────────────────────────────────────────────────────────
+# [FIX-11] 已知上櫃（.TWO）白名單
+# 凡在此集合內的代碼，fetch_tw_ohlcv 直接從 .TWO 開始嘗試，
+# 跳過 .TW，避免 YFPricesMissingError 噪音並節省時間。
+#
+# 辨識依據（出現 "possibly delisted" 即為上櫃股未用正確 suffix）：
+#   8096 → 博威合金（上櫃）
+#   3131 → 弘塑科技（上櫃）
+#   5274 → 信驊科技（上櫃）
+#   4966 → 譜瑞-KY  （上櫃）
+# ──────────────────────────────────────────────────────────────
+_KNOWN_TWO_SYMBOLS: set = {
+    "8096", "3131", "5274", "4966",
+}
 
 # ══════════════════════════════════════════════════════════════
 # 工具函式
@@ -123,10 +160,6 @@ _ETF_WEIGHTS = {
 
 def _fetch_single_etf(ticker: str, period: str = "200d",
                        max_retries: int = 4) -> pd.DataFrame:
-    """
-    下載單一 ETF 的 OHLCV（0050.TW / 006208.TW）。
-    429 做指數退讓；其他錯誤直接回傳空 DataFrame。
-    """
     if yf is None:
         return pd.DataFrame()
 
@@ -140,7 +173,6 @@ def _fetch_single_etf(ticker: str, period: str = "200d",
             if not df.empty and "Close" in df.columns and len(df) >= 20:
                 log.debug(f"  ETF {ticker}: {len(df)} 筆")
                 return df
-            # 資料不足，不重試
             log.debug(f"  ETF {ticker}: 資料不足 ({len(df)} 筆)")
             return pd.DataFrame()
         except Exception as e:
@@ -158,14 +190,6 @@ def _fetch_single_etf(ticker: str, period: str = "200d",
 
 
 def fetch_etf_composite_index(days: int = 180) -> pd.DataFrame:
-    """
-    以 0050.TW 和 006208.TW 加權平均合成大盤指數代理。
-
-    合成步驟：
-      1. 各自以第一日收盤價做指數化（base=100）
-      2. 依 _ETF_WEIGHTS 加權平均
-      3. Close/Open/High/Low 同步縮放；Volume 加總
-    """
     cache_path = os.path.join(CACHE_DIR, "ETF_composite_index.csv")
     period     = f"{days + 60}d"
 
@@ -188,7 +212,6 @@ def fetch_etf_composite_index(days: int = 180) -> pd.DataFrame:
                 log.error(f"  快取讀取失敗: {ce}")
         return pd.DataFrame()
 
-    # 找共同交易日
     all_dates = None
     for ticker, (df, _) in frames.items():
         idx = df.index
@@ -213,10 +236,10 @@ def fetch_etf_composite_index(days: int = 180) -> pd.DataFrame:
         if base <= 0:
             continue
         factor = 100.0 / base
-        composite_close  += sub["Close"].fillna(method="ffill")  * factor * weight
-        composite_open   += sub["Open"].fillna(sub["Close"])     * factor * weight
-        composite_high   += sub["High"].fillna(sub["Close"])     * factor * weight
-        composite_low    += sub["Low"].fillna(sub["Close"])      * factor * weight
+        composite_close  += sub["Close"].ffill()              * factor * weight
+        composite_open   += sub["Open"].fillna(sub["Close"])  * factor * weight
+        composite_high   += sub["High"].fillna(sub["Close"])  * factor * weight
+        composite_low    += sub["Low"].fillna(sub["Close"])   * factor * weight
         vol_col = sub["Volume"] if "Volume" in sub.columns else pd.Series(0.0, index=all_dates)
         composite_volume += vol_col.fillna(0) * weight
         total_weight += weight
@@ -253,7 +276,6 @@ def fetch_etf_composite_index(days: int = 180) -> pd.DataFrame:
 # ══════════════════════════════════════════════════════════════
 
 def _parse_tw_date(s: str):
-    """民國年轉西元年，格式：113/04/01"""
     try:
         parts = str(s).strip().split("/")
         return date(int(parts[0]) + 1911, int(parts[1]), int(parts[2]))
@@ -453,16 +475,10 @@ def fetch_tpex_index(days: int = 180) -> pd.DataFrame:
 
 
 # ══════════════════════════════════════════════════════════════
-# 統一大盤指數入口（三層 fallback，已無 ^TWII）
+# 統一大盤指數入口（三層 fallback + 常數保底）
 # ══════════════════════════════════════════════════════════════
 
 def fetch_market_index(days: int = 180) -> pd.DataFrame:
-    """
-    Layer 0 → ETF 合成（0050.TW + 006208.TW）  ← 主力來源
-    Layer 1 → TWSE 官方 MI_INDEX API
-    Layer 2 → TPEX 備援 API
-    各層均有本地 CSV 快取作為最終保底
-    """
     log.info("  抓取大盤指數（Layer 0: ETF 合成）...")
     df = fetch_etf_composite_index(days=days)
     if not df.empty and len(df) >= 10 and "Close" in df.columns:
@@ -493,22 +509,28 @@ def fetch_market_index(days: int = 180) -> pd.DataFrame:
 
 # ══════════════════════════════════════════════════════════════
 # 個股 OHLCV（.TW → .TWO → 本地快取）
+# [FIX-10][FIX-11][FIX-12] v3.9 核心修正
 # ══════════════════════════════════════════════════════════════
 
 def fetch_tw_ohlcv(sym: str, period: str = "60d",
                    max_retries: int = 4) -> tuple:
     """
     下載個股 OHLCV。
-    - 先嘗試 .TW（上市），失敗才嘗試 .TWO（上櫃）
-    - 429 指數退讓後重試（同一 suffix）
-    - 其他錯誤直接換下一個 suffix
-    - 兩個 suffix 都失敗才回傳 (None, None)
+
+    v3.9 修正：
+    1. _KNOWN_TWO_SYMBOLS 白名單：已知上櫃股直接從 .TWO 開始
+    2. YFPricesMissingError / delisted / no data → 明確識別，
+       立刻 break 換 suffix，不浪費重試次數
+    3. 上述錯誤改為 WARNING 級別（原為 debug），方便追蹤需加白名單的股票
     """
     if yf is None:
         log.warning("yfinance 未安裝，無法下載個股")
         return None, None
 
-    for suffix in [".TW", ".TWO"]:
+    # [FIX-11] 已知上櫃股：直接從 .TWO 開始，省去一次無效嘗試
+    suffixes = [".TWO", ".TW"] if sym in _KNOWN_TWO_SYMBOLS else [".TW", ".TWO"]
+
+    for suffix in suffixes:
         ticker  = f"{sym}{suffix}"
         got_429 = False
 
@@ -524,13 +546,15 @@ def fetch_tw_ohlcv(sym: str, period: str = "60d",
                     log.debug(f"  {ticker}: {len(df)} 筆 (attempt {attempt+1})")
                     return df, suffix
 
-                # 資料不足 → 換 suffix
-                log.debug(f"  {ticker}: 資料不足 ({len(df)} 筆)，換 suffix")
+                # 下載成功但資料不足（.TW 打到上櫃股時常見）→ 換 suffix
+                log.warning(f"  {ticker}: 資料不足 ({len(df)} 筆)，換 suffix")
                 break
 
             except Exception as e:
                 err = str(e).lower()
+
                 if "too many requests" in err or "429" in err or "rate" in err:
+                    # 限速 → 指數退讓，繼續重試同一 suffix
                     wait = (2 ** attempt) * 3 + random.uniform(2, 6)
                     log.warning(
                         f"  {ticker} 429，退讓 {wait:.1f}s "
@@ -538,10 +562,27 @@ def fetch_tw_ohlcv(sym: str, period: str = "60d",
                     )
                     time.sleep(wait)
                     got_429 = True
-                else:
-                    log.debug(f"  {ticker} 非429錯誤: {e}")
+
+                elif (
+                    "missing" in err
+                    or "delisted" in err
+                    or "no data found" in err
+                    or "no price data" in err
+                ):
+                    # [FIX-10][FIX-12] 掛牌市場不符 → 立刻換 suffix
+                    # 改為 WARNING，方便發現哪些股票要加入白名單
+                    log.warning(
+                        f"  {ticker} 不在此市場（上市/上櫃 suffix 不符），"
+                        f"換 suffix。建議加入 _KNOWN_TWO_SYMBOLS。錯誤: {e}"
+                    )
                     break
+
+                else:
+                    log.debug(f"  {ticker} 未知錯誤，換 suffix: {e}")
+                    break
+
         else:
+            # for-else：僅 429 重試耗盡才到這裡
             if got_429:
                 log.warning(f"  {ticker} 429 重試耗盡，換 suffix")
 
@@ -708,7 +749,21 @@ class _RegimeEngine:
             bm_v = bm.dropna(subset=["RSI", "MA60"])
             if len(bm_v) < 2:
                 log.error("RegimeEngine：有效資料不足（需 ≥ 2 列）")
-                return {}
+                return {
+                    "bear":            0.33,
+                    "range":           0.34,
+                    "bull":            0.33,
+                    "label":           "震盪",
+                    "active_strategy": "range",
+                    "active_path":     "423",
+                    "backup_path":     "45",
+                    "slope_5d":        0.0,
+                    "slope_20d":       0.0,
+                    "mkt_rsi":         50.0,
+                    "adx":             20.0,
+                    "history":         [],
+                    "data_source":     "fallback",
+                }
 
             last  = bm_v.iloc[-1]
             rsi   = float(last["RSI"])
@@ -835,7 +890,15 @@ class _FeatureEngine:
 
             if len(bm_v) < 2:
                 log.error("FeatureEngine：RSI 有效資料不足（需 ≥ 2 列）")
-                return {}
+                return {
+                    "index_close":   0.0,
+                    "index_chg_pct": 0.0,
+                    "mkt_rsi":       50.0,
+                    "mkt_slope_5d":  0.0,
+                    "mkt_slope_20d": 0.0,
+                    "volume":        0.0,
+                    "data_source":   "fallback",
+                }
 
             last = bm_v.iloc[-1]
             prev = bm_v.iloc[-2]
@@ -1339,7 +1402,7 @@ def step_market() -> dict:
             f"[來源: {data.get('data_source', '?')}]"
         )
     else:
-        log.error("Market snapshot 失敗")
+        log.error("❌ Market snapshot 失敗")
     return data or {}
 
 
@@ -1354,7 +1417,7 @@ def step_regime(market_data: dict) -> dict:
             f"[來源: {data.get('data_source', '?')}]"
         )
     else:
-        log.error("Regime 定義失敗")
+        log.error("❌ Regime 定義失敗")
     return data or {}
 
 
