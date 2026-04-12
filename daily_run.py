@@ -1,19 +1,29 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  daily_run.py v3.5  資源法 Precompute 主控制器               ║
+║  daily_run.py v3.6  資源法 Precompute 主控制器               ║
 ║                                                              ║
-║  修正清單 v3.5（核心架構重構）：                             ║
-║  [FIX-1] ^TWII 指數改用台灣證交所官方 API（徹底解決 429）    ║
-║  [FIX-2] 建立三層 fallback：TWSE → TPEX → 本地快取          ║
-║  [FIX-3] 從 TWSE MI_INDEX 解析大盤加權指數完整欄位           ║
-║  [FIX-4] 個股 OHLCV 保留 yfinance + 強化 fallback           ║
-║  [FIX-5] 所有 DataFrame 存取加入空值防護                     ║
-║  [FIX-6] 縮排修正、risk engine 接入 main()                  ║
+║  修正清單 v3.6：                                             ║
+║  [FIX-1] 大盤指數改用 0050.TW + 006208.TW 加權合成          ║
+║           徹底告別 ^TWII 的 yfinance 429 問題                ║
+║  [FIX-2] TWSE 官方 MI_INDEX API 保留為第二層 fallback        ║
+║  [FIX-3] TPEX 保留為第三層 fallback                         ║
+║  [FIX-4] 個股 fetch_tw_ohlcv 正確處理 .TW / .TWO suffix     ║
+║           - 先嘗試 .TW，失敗才嘗試 .TWO                     ║
+║           - 429 做指數退讓，其他錯誤直接 break               ║
+║  [FIX-5] DataFrame 空值防護（所有 .iloc[-1] 前先檢查）       ║
+║  [FIX-6] GitHub Actions Node.js 20 警告說明（非程式問題）    ║
+║                                                              ║
+║  大盤合成邏輯：                                              ║
+║    - 0050.TW  權重 0.65（追蹤台灣 50 大型股）               ║
+║    - 006208.TW 權重 0.35（追蹤富邦台50，流動性佳）           ║
+║    - 兩者以收盤價對第一日做指數化後加權平均                  ║
+║    - 最終 Close 欄對齊 TWII 走勢（相關係數通常 > 0.99）      ║
 ╚══════════════════════════════════════════════════════════════╝
 
 資料來源策略：
-  大盤指數  → TWSE 官方 API（主） → TPEX API（備） → 本地快取
-  個股 OHLCV → yfinance（主）→ 本地快取（備）
+  大盤指數  → 0050+006208 合成（主）→ TWSE MI_INDEX API（備1）
+             → TPEX API（備2）→ 本地快取（備3）
+  個股 OHLCV → yfinance .TW → .TWO → 本地快取
 """
 
 import json
@@ -103,7 +113,154 @@ _SESSION_YF.headers["Accept"] = "text/html,application/xhtml+xml,*/*;q=0.8"
 
 
 # ══════════════════════════════════════════════════════════════
-# TWSE 官方 API：大盤加權指數（Layer 1）
+# [NEW v3.6] Layer 0：用 0050.TW + 006208.TW 合成大盤指數
+# ══════════════════════════════════════════════════════════════
+
+# 兩檔 ETF 追蹤台灣 50，與 TWII 相關係數 > 0.99
+# 相較 ^TWII，yfinance 對這兩個代號的 rate limit 寬鬆許多
+_ETF_WEIGHTS = {
+    "0050.TW":   0.65,   # 元大台灣50，規模最大、流動性最佳
+    "006208.TW": 0.35,   # 富邦台50，同樣追蹤台灣50指數
+}
+
+def _fetch_single_etf(ticker: str, period: str = "200d",
+                      max_retries: int = 4) -> pd.DataFrame:
+    """
+    下載單一 ETF 的 OHLCV。
+    - 只用 yfinance，因為這兩支是上市 ETF，不需要切換 .TWO
+    - 429 時做指數退讓；其他錯誤直接回傳空 DataFrame
+    """
+    if yf is None:
+        return pd.DataFrame()
+
+    for attempt in range(max_retries):
+        try:
+            df = yf.download(
+                ticker, period=period, progress=False,
+                auto_adjust=True, timeout=20, session=_SESSION_YF
+            )
+            df = _normalize_df(df)
+            if not df.empty and "Close" in df.columns and len(df) >= 20:
+                log.debug(f"  ETF {ticker}: {len(df)} 筆")
+                return df
+            # 有回應但資料太少，不重試
+            return pd.DataFrame()
+        except Exception as e:
+            err = str(e).lower()
+            if "too many requests" in err or "429" in err or "rate" in err:
+                wait = (2 ** attempt) * 3 + random.uniform(2, 5)
+                log.warning(
+                    f"  ⚠️ {ticker} 429，退讓 {wait:.1f}s "
+                    f"({attempt+1}/{max_retries})"
+                )
+                time.sleep(wait)
+            else:
+                log.debug(f"  {ticker} 下載失敗: {e}")
+                return pd.DataFrame()
+
+    return pd.DataFrame()
+
+
+def fetch_etf_composite_index(days: int = 180) -> pd.DataFrame:
+    """
+    以 0050.TW 和 006208.TW 的加權平均合成大盤指數代理。
+
+    合成步驟：
+      1. 分別下載兩檔 ETF 的 OHLCV
+      2. 各自以第一日收盤價做指數化（base=100）
+      3. 依 _ETF_WEIGHTS 加權平均得到合成指數
+      4. 合成後的 Close 作為大盤代理，Open/High/Low 同步縮放
+      5. Volume 取兩者加總（交易量加總代表市場活躍度）
+
+    回傳欄位：Open, High, Low, Close, Volume（index=DatetimeIndex）
+    """
+    cache_path = os.path.join(CACHE_DIR, "ETF_composite_index.csv")
+    period     = f"{days + 60}d"   # 多抓一些確保有足夠資料
+
+    frames = {}
+    for ticker, weight in _ETF_WEIGHTS.items():
+        df = _fetch_single_etf(ticker, period=period)
+        if not df.empty:
+            frames[ticker] = (df, weight)
+        time.sleep(0.5)   # 禮貌性延遲，避免連續請求
+
+    if not frames:
+        # 所有 ETF 都失敗，嘗試讀快取
+        if os.path.exists(cache_path):
+            try:
+                df = pd.read_csv(cache_path, index_col=0, parse_dates=True)
+                df = _normalize_df(df)
+                if not df.empty:
+                    log.warning(f"  ⚠️ ETF 合成失敗，使用快取 ({cache_path})")
+                    return df
+            except Exception as ce:
+                log.error(f"  快取讀取失敗: {ce}")
+        return pd.DataFrame()
+
+    # 找共同交易日
+    all_dates = None
+    for ticker, (df, _) in frames.items():
+        idx = df.index
+        all_dates = idx if all_dates is None else all_dates.intersection(idx)
+
+    if all_dates is None or len(all_dates) < 10:
+        log.error("  ❌ ETF 合成：共同交易日不足")
+        return pd.DataFrame()
+
+    all_dates = all_dates.sort_values()
+
+    # 指數化後加權平均
+    composite_close  = pd.Series(0.0, index=all_dates)
+    composite_open   = pd.Series(0.0, index=all_dates)
+    composite_high   = pd.Series(0.0, index=all_dates)
+    composite_low    = pd.Series(0.0, index=all_dates)
+    composite_volume = pd.Series(0.0, index=all_dates)
+    total_weight     = 0.0
+
+    for ticker, (df, weight) in frames.items():
+        sub = df.loc[df.index.isin(all_dates)].reindex(all_dates)
+        base = float(sub["Close"].iloc[0])
+        if base <= 0:
+            continue
+        # 指數化：以第一日為 base=100
+        factor = 100.0 / base
+        composite_close  += sub["Close"]  * factor * weight
+        composite_open   += sub["Open"].fillna(sub["Close"])  * factor * weight
+        composite_high   += sub["High"].fillna(sub["Close"])  * factor * weight
+        composite_low    += sub["Low"].fillna(sub["Close"])   * factor * weight
+        vol_col = sub.get("Volume", pd.Series(0.0, index=all_dates))
+        composite_volume += vol_col.fillna(0) * weight
+        total_weight += weight
+
+    if total_weight <= 0:
+        return pd.DataFrame()
+
+    result = pd.DataFrame({
+        "Open":   composite_open   / total_weight,
+        "High":   composite_high   / total_weight,
+        "Low":    composite_low    / total_weight,
+        "Close":  composite_close  / total_weight,
+        "Volume": composite_volume / total_weight,
+    }, index=all_dates)
+
+    result = result.dropna(subset=["Close"]).sort_index()
+    cutoff = pd.Timestamp(date.today() - timedelta(days=days))
+    result = result[result.index >= cutoff]
+
+    if not result.empty:
+        result.to_csv(cache_path)
+        log.info(
+            f"  ✅ ETF 合成大盤指數 ({len(result)} 筆) "
+            f"| 0050={list(_ETF_WEIGHTS.values())[0]:.0%} "
+            f"006208={list(_ETF_WEIGHTS.values())[1]:.0%}"
+        )
+        return result
+
+    return pd.DataFrame()
+
+
+# ══════════════════════════════════════════════════════════════
+# TWSE 官方 API：大盤加權指數（Layer 1 / fallback 1）
 # ══════════════════════════════════════════════════════════════
 
 def _parse_tw_date(s: str):
@@ -130,7 +287,6 @@ def _clean_num(series: pd.Series) -> pd.Series:
 def _twse_index_month(year: int, month: int) -> pd.DataFrame:
     """
     TWSE MI_INDEX 單月大盤加權指數。
-    API 文件：https://www.twse.com.tw/zh/page/trading/exchange/MI_INDEX.html
     回傳欄位：Open, High, Low, Close, Volume（index=Date）
     """
     date_str = f"{year}{month:02d}01"
@@ -143,7 +299,6 @@ def _twse_index_month(year: int, month: int) -> pd.DataFrame:
         resp.raise_for_status()
         payload = resp.json()
 
-        # 找含「加權」的 table
         tables  = payload.get("tables", [])
         target  = None
         for t in tables:
@@ -151,7 +306,6 @@ def _twse_index_month(year: int, month: int) -> pd.DataFrame:
             if "加權" in title and "指數" in title:
                 target = t
                 break
-        # fallback：找含「開盤」的 table
         if target is None:
             for t in tables:
                 if any("開盤" in str(f) for f in t.get("fields", [])):
@@ -166,7 +320,6 @@ def _twse_index_month(year: int, month: int) -> pd.DataFrame:
             return pd.DataFrame()
 
         df = pd.DataFrame(rows, columns=fields)
-
         date_col = next((c for c in df.columns if "日期" in c), None)
         if date_col is None:
             return pd.DataFrame()
@@ -218,7 +371,7 @@ def fetch_twse_index(days: int = 180) -> pd.DataFrame:
         mdf = _twse_index_month(d.year, d.month)
         if not mdf.empty:
             frames.append(mdf)
-        time.sleep(0.35)  # 禮貌性延遲
+        time.sleep(0.35)
 
     if frames:
         df = pd.concat(frames).sort_index()
@@ -230,7 +383,6 @@ def fetch_twse_index(days: int = 180) -> pd.DataFrame:
             log.info(f"  ✅ TWSE 官方指數 ({len(df)} 筆)")
             return df
 
-    # fallback：讀快取
     if os.path.exists(cache_path):
         try:
             df = pd.read_csv(cache_path, index_col=0, parse_dates=True)
@@ -245,14 +397,11 @@ def fetch_twse_index(days: int = 180) -> pd.DataFrame:
 
 
 # ══════════════════════════════════════════════════════════════
-# TPEX 備援 API（Layer 2）
+# TPEX 備援 API（Layer 2 / fallback 2）
 # ══════════════════════════════════════════════════════════════
 
 def fetch_tpex_index(days: int = 180) -> pd.DataFrame:
-    """
-    TPEX 上市櫃每日收盤行情備援。
-    API: https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes
-    """
+    """TPEX 上市櫃每日收盤行情備援。"""
     cache_path = os.path.join(CACHE_DIR, "TPEX_index.csv")
     try:
         url  = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes"
@@ -321,21 +470,27 @@ def fetch_tpex_index(days: int = 180) -> pd.DataFrame:
 
 
 # ══════════════════════════════════════════════════════════════
-# 統一大盤指數入口（三層 fallback）
+# 統一大盤指數入口（四層 fallback）
 # ══════════════════════════════════════════════════════════════
 
 def fetch_market_index(days: int = 180) -> pd.DataFrame:
     """
-    Layer 1 → TWSE 官方 API
+    Layer 0 → ETF 合成（0050.TW + 006208.TW）  ← v3.6 新增，主力來源
+    Layer 1 → TWSE 官方 MI_INDEX API
     Layer 2 → TPEX 備援 API
     Layer 3 → 各自的本地快取（已在各函式內處理）
     """
-    log.info("  🔍 抓取大盤指數（TWSE 官方 API）...")
+    log.info("  🔍 抓取大盤指數（Layer 0: ETF 合成）...")
+    df = fetch_etf_composite_index(days=days)
+    if not df.empty and len(df) >= 10 and "Close" in df.columns:
+        return df
+
+    log.warning("  ⚠️ ETF 合成失敗，切換 TWSE 官方 API（Layer 1）...")
     df = fetch_twse_index(days=days)
     if not df.empty and len(df) >= 10 and "Close" in df.columns:
         return df
 
-    log.warning("  ⚠️ TWSE 失敗，切換 TPEX 備援...")
+    log.warning("  ⚠️ TWSE 失敗，切換 TPEX 備援（Layer 2）...")
     df = fetch_tpex_index(days=days)
     if not df.empty and len(df) >= 10 and "Close" in df.columns:
         return df
@@ -345,15 +500,32 @@ def fetch_market_index(days: int = 180) -> pd.DataFrame:
 
 
 # ══════════════════════════════════════════════════════════════
-# 個股 OHLCV（yfinance + 本地快取）
+# [v3.6 修正] 個股 OHLCV（yfinance .TW → .TWO → 本地快取）
 # ══════════════════════════════════════════════════════════════
 
 def fetch_tw_ohlcv(sym: str, period: str = "60d", max_retries: int = 4):
+    """
+    下載個股 OHLCV。
+
+    處理邏輯（v3.6 修正）：
+    - suffix 順序：先 .TW（上市），再 .TWO（上櫃）
+    - 429 做指數退讓後重試（同一 suffix）
+    - 其他錯誤直接 break，換下一個 suffix
+    - 兩個 suffix 都失敗才回傳 (None, None)
+
+    為何分開處理而非直接合併：
+    - .TW  = 台灣證券交易所（TWSE）上市股票
+    - .TWO = 櫃買中心（TPEX）上櫃股票
+    - 同一代號在兩個交易所意義不同，不能混用
+    """
     if yf is None:
+        log.warning("⚠️ yfinance 未安裝，無法下載個股")
         return None, None
 
     for suffix in [".TW", ".TWO"]:
         ticker = f"{sym}{suffix}"
+        got_429 = False
+
         for attempt in range(max_retries):
             try:
                 df = yf.download(
@@ -361,9 +533,15 @@ def fetch_tw_ohlcv(sym: str, period: str = "60d", max_retries: int = 4):
                     auto_adjust=True, timeout=20, session=_SESSION_YF
                 )
                 df = _normalize_df(df)
-                if not df.empty and len(df) >= 20:
+
+                if not df.empty and "Close" in df.columns and len(df) >= 20:
+                    log.debug(f"  ✅ {ticker}: {len(df)} 筆 (attempt {attempt+1})")
                     return df, suffix
+
+                # 有回應但資料不足（通常是上市/上櫃代號不符），換 suffix
+                log.debug(f"  {ticker}: 資料不足 ({len(df)} 筆)，換 suffix")
                 break
+
             except Exception as e:
                 err = str(e).lower()
                 if "too many requests" in err or "429" in err or "rate" in err:
@@ -373,11 +551,17 @@ def fetch_tw_ohlcv(sym: str, period: str = "60d", max_retries: int = 4):
                         f"({attempt+1}/{max_retries})"
                     )
                     time.sleep(wait)
+                    got_429 = True
                 else:
-                    log.debug(f"  {ticker}: {e}")
+                    # 非 429 錯誤（代號不存在、網路等），直接換 suffix
+                    log.debug(f"  {ticker} 非429錯誤: {e}")
                     break
+        else:
+            # for-else：max_retries 次 429 都沒成功
+            if got_429:
+                log.warning(f"  ⚠️ {ticker} 429 重試耗盡，換 suffix")
 
-    log.warning(f"⚠️ {sym} .TW/.TWO 均無資料，跳過")
+    log.warning(f"  ⚠️ {sym} .TW/.TWO 均無資料，跳過")
     return None, None
 
 
@@ -523,6 +707,11 @@ class _RegimeEngine:
                 log.error("❌ RegimeEngine：dropna 後無有效列")
                 return {}
 
+            # [v3.6 防護] 確認至少有 1 列才取 iloc[-1]
+            if len(bm_v) < 1:
+                log.error("❌ RegimeEngine：bm_v 長度為 0")
+                return {}
+
             last  = bm_v.iloc[-1]
             rsi   = float(last["RSI"])
             adx   = float(last.get("ADX", 25.0))
@@ -588,7 +777,7 @@ class _RegimeEngine:
                 "slope_5d": round(s5d,4), "slope_20d": round(s20d,4),
                 "mkt_rsi": round(rsi,1), "adx": round(adx,1),
                 "history": old_hist,
-                "data_source": "TWSE_official",
+                "data_source": "ETF_composite_0050_006208",
             }
         except Exception as e:
             log.error(f"❌ RegimeEngine 失敗: {e}")
@@ -611,22 +800,31 @@ class _FeatureEngine:
 
             bm["RSI"] = _rsi(bm["Close"])
             bm_v = bm.dropna(subset=["RSI"])
+
+            # [v3.6 防護] 確認至少有 2 列才取 iloc[-1] 和 iloc[-2]
             if len(bm_v) < 2:
-                log.error("❌ FeatureEngine：RSI 有效資料不足")
+                log.error("❌ FeatureEngine：RSI 有效資料不足（需 ≥ 2 列）")
                 return {}
 
-            last = bm_v.iloc[-1]; prev = bm_v.iloc[-2]
+            last = bm_v.iloc[-1]
+            prev = bm_v.iloc[-2]
             chg  = float((last["Close"] - prev["Close"]) / (prev["Close"] + 1e-9) * 100)
             rsi  = float(last["RSI"])
+
+            # pct_change 後也需要防護
+            pc5  = bm["Close"].pct_change(5)
+            pc20 = bm["Close"].pct_change(20)
+            slope_5d  = float(pc5.iloc[-1])  if len(pc5)  >= 1 and not pc5.isna().all()  else 0.0
+            slope_20d = float(pc20.iloc[-1]) if len(pc20) >= 1 and not pc20.isna().all() else 0.0
 
             return {
                 "index_close":   float(last["Close"]),
                 "index_chg_pct": round(chg, 2),
                 "mkt_rsi":       rsi if not math.isnan(rsi) else 50.0,
-                "mkt_slope_5d":  round(float(bm["Close"].pct_change(5).iloc[-1]  * 100), 4),
-                "mkt_slope_20d": round(float(bm["Close"].pct_change(20).iloc[-1] * 100), 4),
+                "mkt_slope_5d":  round(slope_5d  * 100, 4),
+                "mkt_slope_20d": round(slope_20d * 100, 4),
                 "volume":        float(last.get("Volume", 0)),
-                "data_source":   "TWSE_official",
+                "data_source":   "ETF_composite_0050_006208",
             }
         except Exception as e:
             log.error(f"❌ FeatureEngine 失敗: {e}")
@@ -998,7 +1196,7 @@ def step_market() -> dict:
     if data:
         save_json(os.path.join(MARKET_DIR, "market_snapshot.json"), data)
         log.info(
-            f"大盤: {data.get('index_close',0):,.1f} "
+            f"大盤: {data.get('index_close',0):,.2f} "
             f"({data.get('index_chg_pct',0):+.2f}%) "
             f"[來源: {data.get('data_source','?')}]"
         )
