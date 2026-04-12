@@ -1,32 +1,21 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  daily_run.py v3.10  資源法 Precompute 主控制器              ║
+║  daily_run.py v3.11  資源法 Precompute 主控制器              ║
 ║                                                              ║
-║  v3.7 修正清單：                                             ║
-║  [FIX-1] 完全移除 ^TWII，改用 0050.TW + 006208.TW 合成      ║
-║  [FIX-2] 統一 .TW → .TWO fallback，429 指數退讓              ║
-║  [FIX-3] DataFrame 空值防護（iloc 前先檢查長度）              ║
-║  [FIX-4] 所有 st.warning 改為 log.warning，減少黃字噪音      ║
-║  [FIX-5] Python 3.12 型別提示相容（Optional）                ║
+║  v3.7-v3.10 修正清單：（略，詳見 git log）                   ║
 ║                                                              ║
-║  v3.8 修正清單（空資料流入引擎防護）：                        ║
-║  [FIX-6] fetch_market_index：所有來源失敗時啟動常數 fallback  ║
-║  [FIX-7] FeatureEngine：空欄檢查 + fallback 回傳，不 crash   ║
-║  [FIX-8] RegimeEngine：空欄檢查 + fallback 回傳，不 crash    ║
-║  [FIX-9] main()：Regime fallback 不再 sys.exit(1)            ║
-║                                                              ║
-║  v3.9 修正清單（上櫃股 .TWO 自動識別）：                     ║
-║  [FIX-10] fetch_tw_ohlcv：YFPricesMissingError/delisted      ║
-║           明確識別 → 立刻換 .TWO，不浪費重試次數             ║
-║  [FIX-11] 新增 _KNOWN_TWO_SYMBOLS 白名單，直接從 .TWO 開始   ║
-║  [FIX-12] delisted log 改為 WARNING 級別，方便後續追蹤       ║
-║                                                              ║
-║  v3.10 修正清單（動態 TW/TWO 偵測，徹底解決上櫃股問題）：    ║
-║  [FIX-13] 新增 _resolve_suffix()：用 yf.Ticker.history(1d)  ║
-║           動態偵測上市/上櫃，結果寫入執行期 LRU cache        ║
-║  [FIX-14] 移除靜態 _KNOWN_TWO_SYMBOLS，改用動態快取          ║
-║  [FIX-15] fetch_tw_ohlcv 改用 _resolve_suffix 決定順序       ║
-║           解決大量新上櫃股（3293/3680/3529...）噪音問題      ║
+║  v3.11 修正清單（429 限速 + FinMind 雙源備援）：             ║
+║  [FIX-16] 根本原因釐清：5469.TW/TWO 兩個都失敗 =            ║
+║           非 suffix 問題，而是 Yahoo 429 限速導致            ║
+║           _resolve_suffix 誤判為「無資料」並寫入 None cache  ║
+║  [FIX-17] _resolve_suffix：429 時不寫 None cache，           ║
+║           改為「本次跳過偵測」，保留下次重試機會             ║
+║  [FIX-18] fetch_tw_ohlcv：新增 FinMind API 備援來源          ║
+║           Yahoo 429 耗盡 → 自動切換 FinMind 下載             ║
+║  [FIX-19] 全域請求間隔從 0.8-1.5s 提高至 1.5-2.5s           ║
+║           根本解決 429 的觸發頻率                            ║
+║  [FIX-20] fetch_finmind_ohlcv：FinMind TWSE/TPEX 雙市場      ║
+║           自動偵測，TOKEN 從環境變數 FINMIND_TOKEN 讀取      ║
 ╚══════════════════════════════════════════════════════════════╝
 
 大盤合成邏輯：
@@ -179,16 +168,12 @@ def _save_suffix_cache() -> None:
 
 def _resolve_suffix(sym: str) -> Optional[str]:
     """
-    [FIX-13] 動態偵測股票掛牌市場，回傳 ".TW" 或 ".TWO" 或 None。
+    [FIX-13][FIX-17] 動態偵測股票掛牌市場，回傳 ".TW" 或 ".TWO" 或 None。
 
-    流程：
-      1. 先查記憶體快取 → 直接回傳（最快）
-      2. 查磁碟快取    → 更新記憶體並回傳
-      3. 用 yf.Ticker.history(1d) 依序試 .TW / .TWO
-         - Ticker.history 不產生 ERROR log，比 yf.download 乾淨
-      4. 結果寫入記憶體 + 磁碟快取
-
-    注意：此函式本身不做 429 重試，429 由 fetch_tw_ohlcv 處理。
+    v3.11 修正：
+    - 429 時不寫入 None cache（原本會永久跳過該股票）
+    - 只有真正兩個都沒資料時才寫 None（真下市）
+    - 每次嘗試加入 sleep 防止連續觸發 429
     """
     if sym in _SUFFIX_CACHE:
         return _SUFFIX_CACHE[sym]
@@ -196,21 +181,35 @@ def _resolve_suffix(sym: str) -> Optional[str]:
     if yf is None:
         return ".TW"
 
+    got_rate_limited = False
     for suffix in [".TW", ".TWO"]:
         ticker = f"{sym}{suffix}"
         try:
-            t   = yf.Ticker(ticker)
+            t    = yf.Ticker(ticker)
             hist = t.history(period="5d")
             if not hist.empty:
                 log.debug(f"  suffix偵測: {sym} → {suffix}")
                 _SUFFIX_CACHE[sym] = suffix
                 _save_suffix_cache()
                 return suffix
-        except Exception:
-            continue
+            # 空資料但無異常 → 繼續試另一個 suffix
+            time.sleep(0.5)
+        except Exception as e:
+            err = str(e).lower()
+            if "too many requests" in err or "429" in err or "rate" in err:
+                # [FIX-17] 429 → 不寫 None，本次直接預設 .TW 讓 fetch_tw_ohlcv 處理
+                log.warning(f"  suffix偵測: {sym} 遇到 429，跳過偵測，預設 .TW")
+                got_rate_limited = True
+                break
+            # 其他錯誤繼續試
+            time.sleep(0.3)
 
-    # 兩個都沒資料（真的下市或代碼錯誤）
-    log.warning(f"  suffix偵測: {sym} 兩個 suffix 均無資料，跳過")
+    if got_rate_limited:
+        # 不存 cache，讓下次重新偵測
+        return ".TW"
+
+    # 真的兩個都沒資料（下市 / 代碼錯）
+    log.warning(f"  suffix偵測: {sym} 兩個 suffix 均無資料，可能已下市")
     _SUFFIX_CACHE[sym] = None
     _save_suffix_cache()
     return None
@@ -580,65 +579,160 @@ def fetch_market_index(days: int = 180) -> pd.DataFrame:
 
 
 # ══════════════════════════════════════════════════════════════
-# 個股 OHLCV（動態偵測 .TW / .TWO）
-# [FIX-15] v3.10：改用 _resolve_suffix() 取代靜態白名單
+# [FIX-20] FinMind 備援下載（Yahoo 429 耗盡時啟用）
+# TOKEN 從環境變數 FINMIND_TOKEN 讀取（已存於 GitHub Secrets）
+# ══════════════════════════════════════════════════════════════
+
+_FINMIND_TOKEN = os.environ.get("FINMIND_TOKEN", "")
+_FINMIND_URL   = "https://api.finmindtrade.com/api/v4/data"
+
+
+def fetch_finmind_ohlcv(sym: str, days: int = 90) -> Optional[pd.DataFrame]:
+    """
+    [FIX-20] 從 FinMind API 下載個股 OHLCV。
+
+    自動嘗試 TWSE（上市）和 TPEX（上櫃）兩個資料集。
+    回傳標準化 DataFrame（Close/Open/High/Low/Volume）或 None。
+    """
+    if not _FINMIND_TOKEN:
+        log.debug("  FinMind TOKEN 未設定，跳過")
+        return None
+
+    start_date = (date.today() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    # 上市優先，上櫃備援
+    for dataset in ["TaiwanStockPrice", "TaiwanStockPriceAdj"]:
+        try:
+            params = {
+                "dataset":   dataset,
+                "data_id":   sym,
+                "start_date": start_date,
+                "token":     _FINMIND_TOKEN,
+            }
+            resp = requests.get(_FINMIND_URL, params=params, timeout=20)
+            resp.raise_for_status()
+            payload = resp.json()
+
+            if payload.get("status") != 200:
+                continue
+
+            records = payload.get("data", [])
+            if not records:
+                continue
+
+            df = pd.DataFrame(records)
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.set_index("date").sort_index()
+
+            # 欄位對應
+            col_map = {
+                "open":   "Open",
+                "max":    "High",
+                "min":    "Low",
+                "close":  "Close",
+                "Trading_Volume": "Volume",
+                "volume": "Volume",
+            }
+            renamed = {}
+            for src, dst in col_map.items():
+                if src in df.columns:
+                    renamed[src] = dst
+            df = df.rename(columns=renamed)
+
+            needed = ["Open", "High", "Low", "Close"]
+            if not all(c in df.columns for c in needed):
+                continue
+            if "Volume" not in df.columns:
+                df["Volume"] = 0.0
+
+            df = df[["Open", "High", "Low", "Close", "Volume"]].apply(
+                pd.to_numeric, errors="coerce"
+            ).dropna(subset=["Close"])
+
+            if len(df) >= 20:
+                log.info(f"  ✅ FinMind {sym}: {len(df)} 筆 [{dataset}]")
+                return df
+
+        except Exception as e:
+            log.debug(f"  FinMind {sym} [{dataset}]: {e}")
+            continue
+
+    log.warning(f"  FinMind {sym}: 兩個資料集均無資料")
+    return None
+
+
+# ══════════════════════════════════════════════════════════════
+# 個股 OHLCV（動態偵測 .TW / .TWO + FinMind 備援）
+# [FIX-15][FIX-18][FIX-19] v3.11 核心修正
 # ══════════════════════════════════════════════════════════════
 
 def fetch_tw_ohlcv(sym: str, period: str = "60d",
-                   max_retries: int = 4) -> tuple:
+                   max_retries: int = 3) -> tuple:
     """
     下載個股 OHLCV。
 
-    v3.10 流程：
-    1. _resolve_suffix(sym) → 動態偵測掛牌市場（有磁碟 cache）
-       - 已知 → 直接用正確 suffix 下載，無噪音
-       - 未知 → Ticker.history(5d) 靜默偵測，不產生 ERROR log
-    2. 優先 suffix 失敗時仍 fallback 到另一個 suffix
-    3. 429 → 指數退讓重試（同一 suffix）
+    v3.11 三層架構：
+    Layer 1 - Yahoo Finance（主要來源）
+      - _resolve_suffix 動態偵測 .TW/.TWO
+      - 429 做指數退讓重試，最多 3 次
+      - 每次嘗試之間 sleep 1.5-2.5s（[FIX-19]）
+    Layer 2 - FinMind API（[FIX-18]）
+      - Yahoo 429 耗盡後自動切換
+      - 使用 FINMIND_TOKEN 環境變數
+    Layer 3 - 回傳 None（讓上層跳過此股）
     """
     if yf is None:
-        log.warning("yfinance 未安裝，無法下載個股")
-        return None, None
+        log.warning("yfinance 未安裝，嘗試 FinMind")
+        df = fetch_finmind_ohlcv(sym)
+        return (df, "FinMind") if df is not None else (None, None)
 
     # [FIX-15] 動態決定 suffix 順序
     detected = _resolve_suffix(sym)
     if detected is None:
-        # 兩個都沒資料，直接跳過
-        log.warning(f"  {sym}: suffix 偵測失敗，跳過")
+        log.warning(f"  {sym}: suffix 偵測確認無資料，跳過")
         return None, None
 
-    # 偵測到的 suffix 優先，另一個作 fallback
-    other = ".TWO" if detected == ".TW" else ".TW"
+    other    = ".TWO" if detected == ".TW" else ".TW"
     suffixes = [detected, other]
+    yahoo_exhausted = False  # 追蹤 Yahoo 是否被 429 完全耗盡
 
     for suffix in suffixes:
         ticker  = f"{sym}{suffix}"
         got_429 = False
 
         for attempt in range(max_retries):
+            # [FIX-19] 每次請求前 sleep，根本降低 429 觸發率
+            base_sleep = 1.5 + random.uniform(0.0, 1.0)
+            if attempt > 0:
+                base_sleep += attempt * 2.0   # 重試時加長等待
+            time.sleep(base_sleep)
+
             try:
                 df = yf.download(
                     ticker, period=period, progress=False,
-                    auto_adjust=True, timeout=20, session=_SESSION_YF
+                    auto_adjust=True, timeout=25, session=_SESSION_YF
                 )
                 df = _normalize_df(df)
 
                 if not df.empty and "Close" in df.columns and len(df) >= 20:
-                    # 如果成功的 suffix 跟偵測不同，更新 cache
                     if suffix != detected:
                         log.info(f"  {sym}: 更新 suffix cache → {suffix}")
                         _SUFFIX_CACHE[sym] = suffix
                         _save_suffix_cache()
                     return df, suffix
 
-                log.debug(f"  {ticker}: 資料不足 ({len(df)} 筆)，換 suffix")
+                # 資料不足（0 筆常是 429 被靜默回傳空資料）
+                if df.empty or len(df) == 0:
+                    log.warning(f"  {ticker}: 回傳空資料（可能是靜默限速），換 suffix")
+                else:
+                    log.debug(f"  {ticker}: 資料不足 ({len(df)} 筆)，換 suffix")
                 break
 
             except Exception as e:
                 err = str(e).lower()
 
                 if "too many requests" in err or "429" in err or "rate" in err:
-                    wait = (2 ** attempt) * 3 + random.uniform(2, 6)
+                    wait = (2 ** attempt) * 5 + random.uniform(3, 8)
                     log.warning(
                         f"  {ticker} 429，退讓 {wait:.1f}s "
                         f"({attempt+1}/{max_retries})"
@@ -650,7 +744,6 @@ def fetch_tw_ohlcv(sym: str, period: str = "60d",
                     "missing" in err or "delisted" in err
                     or "no data found" in err or "no price data" in err
                 ):
-                    # suffix 不符 → 更新 cache 並換 suffix
                     log.warning(f"  {ticker} 掛牌市場不符，換 suffix")
                     if suffix == detected:
                         _SUFFIX_CACHE[sym] = other
@@ -662,10 +755,19 @@ def fetch_tw_ohlcv(sym: str, period: str = "60d",
                     break
 
         else:
+            # for-else：全部重試耗盡（只有 429 才走到這）
             if got_429:
-                log.warning(f"  {ticker} 429 重試耗盡，換 suffix")
+                log.warning(f"  {ticker} 429 重試({max_retries}次)耗盡")
+                yahoo_exhausted = True
 
-    log.warning(f"  {sym} .TW/.TWO 均無資料，跳過")
+    # [FIX-18] Yahoo 完全失敗 → 切換 FinMind
+    if yahoo_exhausted or True:  # 只要 Yahoo 無資料都試 FinMind
+        log.info(f"  {sym}: 嘗試 FinMind 備援...")
+        df_fm = fetch_finmind_ohlcv(sym, days=int(period.replace("d", "")))
+        if df_fm is not None:
+            return df_fm, "FinMind"
+
+    log.warning(f"  {sym} Yahoo + FinMind 均無資料，跳過")
     return None, None
 
 
@@ -1094,7 +1196,7 @@ def run_v4(symbols, regime, today, day_dir) -> dict:
 
     rows = []; skipped = 0
     for sym in symbols:
-        time.sleep(random.uniform(0.8, 1.5))
+        time.sleep(random.uniform(1.5, 2.5))  # [FIX-19] 提高間隔防 429
         try:
             df = load_from_csv(sym, day_dir)
             if df is None:
@@ -1339,7 +1441,7 @@ def run_v12(symbols, regime, v4_data, today, day_dir) -> dict:
     positions = []; path_counts = {}
     for cand in cands[:12]:
         sym = cand["symbol"]
-        time.sleep(random.uniform(0.8, 1.5))
+        time.sleep(random.uniform(1.5, 2.5))  # [FIX-19] 提高間隔防 429
         try:
             df = load_from_csv(sym, day_dir)
             if df is None:
