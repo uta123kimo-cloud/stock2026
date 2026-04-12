@@ -1,13 +1,25 @@
 {
-  "_comment": "此檔案由 daily_run.py 自動生成覆蓋",
-  "generated_at": "2026-04-11 00:00",
-  "date": "2026-04-11",
-  "bear": 0.33, "range": 0.34, "bull": 0.33,
-  "label": "震盪",
+  "bear": 0.244,
+  "range": 0.2843,
+  "bull": 0.4717,
+  "label": "偏多震盪",
   "active_strategy": "range",
   "active_path": "423",
   "backup_path": "45",
-  "slope_5d": 0.0, "slope_20d": 0.0,
-  "mkt_rsi": 50.0, "adx": 20.0,
-  "history": []
+  "slope_5d": 0.0696,
+  "slope_20d": 0.033,
+  "mkt_rsi": 63.0,
+  "adx": 15.4,
+  "history": [
+    {
+      "month": "2026-04",
+      "bear": 0.244,
+      "range": 0.2843,
+      "bull": 0.4717,
+      "label": "偏多震盪"
+    }
+  ],
+  "data_source": "ETF_composite_0050_006208",
+  "generated_at": "2026-04-12 13:47",
+  "date": "2026-04-12"
 }

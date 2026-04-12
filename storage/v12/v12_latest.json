@@ -1,11 +1,43 @@
 {
-  "_comment": "此檔案由 daily_run.py 自動生成覆蓋，此為初始化佔位符",
-  "generated_at": "2026-04-11 00:00",
-  "date": "2026-04-11",
   "market": "TW",
-  "regime": "range",
-  "active_path": "423",
-  "backup_path": "45",
+  "positions": [
+    {
+      "symbol": "4966",
+      "path": "45",
+      "ev": 3.47,
+      "ev_tier": "🔥主力",
+      "action": "進場",
+      "exit_signal": "—",
+      "quality": "Pure",
+      "days_held": 0,
+      "curr_ret_pct": 0.0,
+      "entry_price": 533.0,
+      "tp1_price": 639.6,
+      "tp2_price": 682.2,
+      "stop_price": 505.2,
+      "regime": "range",
+      "close": 533.0,
+      "batch": 1
+    },
+    {
+      "symbol": "2382",
+      "path": "45",
+      "ev": 3.47,
+      "ev_tier": "🔥主力",
+      "action": "進場",
+      "exit_signal": "—",
+      "quality": "Pure",
+      "days_held": 0,
+      "curr_ret_pct": 0.0,
+      "entry_price": 321.5,
+      "tp1_price": 385.8,
+      "tp2_price": 411.5,
+      "stop_price": 307.1,
+      "regime": "range",
+      "close": 321.5,
+      "batch": 1
+    }
+  ],
   "stats": {
     "total_trades": 112,
     "win_rate": 57.1,
@@ -16,5 +48,12 @@
     "simple_cagr": 96.9,
     "pl_ratio": 2.31
   },
-  "positions": []
+  "regime": "range",
+  "active_path": "423",
+  "backup_path": "45",
+  "path_counts": {
+    "45": 2
+  },
+  "generated_at": "2026-04-12 13:48",
+  "date": "2026-04-12"
 }
