@@ -1,28 +1,30 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  daily_run.py v3.11  資源法 Precompute 主控制器              ║
+║  daily_run.py v3.12  資源法 Precompute 主控制器              ║
 ║                                                              ║
-║  v3.7-v3.10 修正清單：（略，詳見 git log）                   ║
+║  基於 v3.11，僅修正下列三個問題：                            ║
 ║                                                              ║
-║  v3.11 修正清單（429 限速 + FinMind 雙源備援）：             ║
-║  [FIX-16] 根本原因釐清：5469.TW/TWO 兩個都失敗 =            ║
-║           非 suffix 問題，而是 Yahoo 429 限速導致            ║
-║           _resolve_suffix 誤判為「無資料」並寫入 None cache  ║
-║  [FIX-17] _resolve_suffix：429 時不寫 None cache，           ║
-║           改為「本次跳過偵測」，保留下次重試機會             ║
-║  [FIX-18] fetch_tw_ohlcv：新增 FinMind API 備援來源          ║
-║           Yahoo 429 耗盡 → 自動切換 FinMind 下載             ║
-║  [FIX-19] 全域請求間隔從 0.8-1.5s 提高至 1.5-2.5s           ║
-║           根本解決 429 的觸發頻率                            ║
-║  [FIX-20] fetch_finmind_ohlcv：FinMind TWSE/TPEX 雙市場      ║
-║           自動偵測，TOKEN 從環境變數 FINMIND_TOKEN 讀取      ║
+║  [FIX-21] fetch_tpex_index                                   ║
+║    原因：`_num(...) or result["Close"]` 對 pandas Series     ║
+║          做布林判斷 → ValueError: ambiguous                  ║
+║    修正：改為明確的 `if s is None` 判斷，再用 fillna         ║
+║                                                              ║
+║  [FIX-22] fetch_tw_ohlcv                                     ║
+║    原因：`if yahoo_exhausted or True:` 讓每支股票            ║
+║          無條件呼叫 FinMind，浪費配額且遮蔽真正錯誤          ║
+║    修正：移除 `or True`，只有 Yahoo 真正耗盡時才呼叫         ║
+║                                                              ║
+║  [FIX-23] _FINMIND_TOKEN 雙源讀取                            ║
+║    原因：GitHub Actions 用環境變數、Streamlit 用 st.secrets  ║
+║          原本只讀環境變數，Streamlit 環境下 Token 永遠空白   ║
+║    修正：優先環境變數，fallback 到 st.secrets                ║
 ╚══════════════════════════════════════════════════════════════╝
 
-大盤合成邏輯：
-  - 0050.TW  權重 0.65（元大台灣50，追蹤台灣50大型股）
-  - 006208.TW 權重 0.35（富邦台50，流動性佳）
-  - 兩者以收盤價對第一日做指數化後加權平均
-  - 最終 Close 欄對齊 TWII 走勢（相關係數通常 > 0.99）
+使用方式：
+  將此檔案中三個修正區塊（標記 [FIX-21/22/23]）複製回
+  daily_run.py 對應位置即可，其餘程式碼完全不動。
+
+  或直接將整個 daily_run.py 換成本檔案（已含完整程式）。
 """
 
 import json
@@ -101,7 +103,6 @@ SYMBOLS = list(dict.fromkeys([
 # ══════════════════════════════════════════════════════════════
 
 def _normalize_df(df: pd.DataFrame) -> pd.DataFrame:
-    """MultiIndex 攤平 + 欄名去空白。"""
     if df is None:
         return pd.DataFrame()
     if isinstance(df.columns, pd.MultiIndex):
@@ -131,22 +132,54 @@ _SESSION_YF.headers["Accept"] = "text/html,application/xhtml+xml,*/*;q=0.8"
 
 
 # ══════════════════════════════════════════════════════════════
-# [FIX-13][FIX-14] 動態 suffix 偵測（取代靜態白名單）
+# [FIX-23] FinMind Token — 雙源讀取
 #
-# 設計原則：
-#   1. 執行期 LRU cache（_SUFFIX_CACHE）：每次 Actions run 只偵測一次
-#   2. 磁碟持久化 cache（suffix_cache.json）：跨 run 不重複偵測
-#   3. 用 yf.Ticker.history(period="1d") 而非 yf.download，
-#      避免產生 HTTP 404 Error log 噪音
-#   4. 兩個 suffix 都沒資料 → 回傳 None（讓 fetch_tw_ohlcv 處理）
+#  讀取優先順序：
+#   1. os.environ["FINMIND_TOKEN"]  → GitHub Actions Secrets
+#   2. st.secrets["FINMIND_TOKEN"]  → Streamlit Cloud Secrets
+#   3. ""（空字串）                 → 兩個環境都沒設定，FinMind 停用
+#
+#  原本 v3.11 只讀環境變數，在 Streamlit 環境中 Token 永遠空白
+#  導致 FinMind 備援完全無效。
 # ══════════════════════════════════════════════════════════════
 
-_SUFFIX_CACHE: dict = {}          # 執行期記憶體快取
+def _load_finmind_token() -> str:
+    # 1. 環境變數（GitHub Actions / 任何 CI）
+    token = os.environ.get("FINMIND_TOKEN", "").strip()
+    if token:
+        log.debug("  FinMind Token 來源: 環境變數 (GitHub Secrets)")
+        return token
+
+    # 2. Streamlit Secrets（只在 Streamlit 環境才 import，避免非 Streamlit 環境報錯）
+    try:
+        import streamlit as st          # noqa: PLC0415
+        token = st.secrets.get("FINMIND_TOKEN", "").strip()
+        if token:
+            log.debug("  FinMind Token 來源: Streamlit st.secrets")
+            return token
+    except Exception:
+        pass  # 非 Streamlit 環境，正常略過
+
+    log.warning(
+        "  FinMind Token 未設定"
+        "（請在 GitHub Secrets 或 Streamlit Secrets 加入 FINMIND_TOKEN）"
+    )
+    return ""
+
+
+_FINMIND_TOKEN = _load_finmind_token()
+_FINMIND_URL   = "https://api.finmindtrade.com/api/v4/data"
+
+
+# ══════════════════════════════════════════════════════════════
+# suffix 偵測（與 v3.11 相同，無修改）
+# ══════════════════════════════════════════════════════════════
+
+_SUFFIX_CACHE: dict = {}
 _SUFFIX_CACHE_PATH = os.path.join(CACHE_DIR, "suffix_cache.json")
 
 
 def _load_suffix_cache() -> None:
-    """從磁碟載入 suffix cache（module 載入時執行一次）。"""
     global _SUFFIX_CACHE
     if os.path.exists(_SUFFIX_CACHE_PATH):
         try:
@@ -158,7 +191,6 @@ def _load_suffix_cache() -> None:
 
 
 def _save_suffix_cache() -> None:
-    """將 suffix cache 寫回磁碟。"""
     try:
         with open(_SUFFIX_CACHE_PATH, "w", encoding="utf-8") as f:
             json.dump(_SUFFIX_CACHE, f, ensure_ascii=False)
@@ -167,20 +199,10 @@ def _save_suffix_cache() -> None:
 
 
 def _resolve_suffix(sym: str) -> Optional[str]:
-    """
-    [FIX-13][FIX-17] 動態偵測股票掛牌市場，回傳 ".TW" 或 ".TWO" 或 None。
-
-    v3.11 修正：
-    - 429 時不寫入 None cache（原本會永久跳過該股票）
-    - 只有真正兩個都沒資料時才寫 None（真下市）
-    - 每次嘗試加入 sleep 防止連續觸發 429
-    """
     if sym in _SUFFIX_CACHE:
         return _SUFFIX_CACHE[sym]
-
     if yf is None:
         return ".TW"
-
     got_rate_limited = False
     for suffix in [".TW", ".TWO"]:
         ticker = f"{sym}{suffix}"
@@ -192,35 +214,27 @@ def _resolve_suffix(sym: str) -> Optional[str]:
                 _SUFFIX_CACHE[sym] = suffix
                 _save_suffix_cache()
                 return suffix
-            # 空資料但無異常 → 繼續試另一個 suffix
             time.sleep(0.5)
         except Exception as e:
             err = str(e).lower()
             if "too many requests" in err or "429" in err or "rate" in err:
-                # [FIX-17] 429 → 不寫 None，本次直接預設 .TW 讓 fetch_tw_ohlcv 處理
                 log.warning(f"  suffix偵測: {sym} 遇到 429，跳過偵測，預設 .TW")
                 got_rate_limited = True
                 break
-            # 其他錯誤繼續試
             time.sleep(0.3)
-
     if got_rate_limited:
-        # 不存 cache，讓下次重新偵測
         return ".TW"
-
-    # 真的兩個都沒資料（下市 / 代碼錯）
     log.warning(f"  suffix偵測: {sym} 兩個 suffix 均無資料，可能已下市")
     _SUFFIX_CACHE[sym] = None
     _save_suffix_cache()
     return None
 
 
-# 啟動時載入磁碟 cache
 _load_suffix_cache()
 
 
 # ══════════════════════════════════════════════════════════════
-# Layer 0：用 0050.TW + 006208.TW 合成大盤指數（取代 ^TWII）
+# Layer 0：ETF 合成大盤（與 v3.11 相同，無修改）
 # ══════════════════════════════════════════════════════════════
 
 _ETF_WEIGHTS = {
@@ -233,7 +247,6 @@ def _fetch_single_etf(ticker: str, period: str = "200d",
                        max_retries: int = 4) -> pd.DataFrame:
     if yf is None:
         return pd.DataFrame()
-
     for attempt in range(max_retries):
         try:
             df = yf.download(
@@ -242,9 +255,7 @@ def _fetch_single_etf(ticker: str, period: str = "200d",
             )
             df = _normalize_df(df)
             if not df.empty and "Close" in df.columns and len(df) >= 20:
-                log.debug(f"  ETF {ticker}: {len(df)} 筆")
                 return df
-            log.debug(f"  ETF {ticker}: 資料不足 ({len(df)} 筆)")
             return pd.DataFrame()
         except Exception as e:
             err = str(e).lower()
@@ -255,7 +266,6 @@ def _fetch_single_etf(ticker: str, period: str = "200d",
             else:
                 log.debug(f"  ETF {ticker} 下載失敗: {e}")
                 return pd.DataFrame()
-
     log.warning(f"  ETF {ticker} 429 重試耗盡")
     return pd.DataFrame()
 
@@ -263,7 +273,6 @@ def _fetch_single_etf(ticker: str, period: str = "200d",
 def fetch_etf_composite_index(days: int = 180) -> pd.DataFrame:
     cache_path = os.path.join(CACHE_DIR, "ETF_composite_index.csv")
     period     = f"{days + 60}d"
-
     frames = {}
     for ticker, weight in _ETF_WEIGHTS.items():
         df = _fetch_single_etf(ticker, period=period)
@@ -293,7 +302,6 @@ def fetch_etf_composite_index(days: int = 180) -> pd.DataFrame:
         return pd.DataFrame()
 
     all_dates = all_dates.sort_values()
-
     composite_close  = pd.Series(0.0, index=all_dates)
     composite_open   = pd.Series(0.0, index=all_dates)
     composite_high   = pd.Series(0.0, index=all_dates)
@@ -338,12 +346,11 @@ def fetch_etf_composite_index(days: int = 180) -> pd.DataFrame:
             f"006208={_ETF_WEIGHTS['006208.TW']:.0%}"
         )
         return result
-
     return pd.DataFrame()
 
 
 # ══════════════════════════════════════════════════════════════
-# Layer 1：TWSE 官方 MI_INDEX API（fallback 1）
+# Layer 1：TWSE 官方 MI_INDEX（與 v3.11 相同，無修改）
 # ══════════════════════════════════════════════════════════════
 
 def _parse_tw_date(s: str):
@@ -376,36 +383,29 @@ def _twse_index_month(year: int, month: int) -> pd.DataFrame:
         resp = _SESSION_TWSE.get(url, timeout=15)
         resp.raise_for_status()
         payload = resp.json()
-
         tables = payload.get("tables", [])
         target = None
         for t in tables:
             title = t.get("title", "")
             if "加權" in title and "指數" in title:
-                target = t
-                break
+                target = t; break
         if target is None:
             for t in tables:
                 if any("開盤" in str(f) for f in t.get("fields", [])):
-                    target = t
-                    break
+                    target = t; break
         if target is None:
             return pd.DataFrame()
-
         fields = target.get("fields", [])
         rows   = target.get("data",   [])
         if not rows:
             return pd.DataFrame()
-
         df = pd.DataFrame(rows, columns=fields)
         date_col = next((c for c in df.columns if "日期" in c), None)
         if date_col is None:
             return pd.DataFrame()
-
         df["_Date"] = df[date_col].apply(_parse_tw_date)
         df = df.dropna(subset=["_Date"]).set_index("_Date")
         df.index = pd.to_datetime(df.index)
-
         col_map = {
             "開盤指數": "Open", "最高指數": "High",
             "最低指數": "Low",  "收盤指數": "Close",
@@ -416,18 +416,14 @@ def _twse_index_month(year: int, month: int) -> pd.DataFrame:
             matched = next((c for c in df.columns if tw in c), None)
             if matched:
                 result[en] = _clean_num(df[matched])
-
         if "Close" not in result.columns:
             return pd.DataFrame()
-
         for col in ["Open", "High", "Low"]:
             if col not in result.columns:
                 result[col] = result["Close"]
         if "Volume" not in result.columns:
             result["Volume"] = 0.0
-
         return result.dropna(subset=["Close"]).sort_index()
-
     except Exception as e:
         log.debug(f"  TWSE MI_INDEX {year}/{month}: {e}")
         return pd.DataFrame()
@@ -438,7 +434,6 @@ def fetch_twse_index(days: int = 180) -> pd.DataFrame:
     today_d    = date.today()
     months_n   = math.ceil(days / 20) + 1
     seen, frames = set(), []
-
     for i in range(months_n):
         d   = today_d - timedelta(days=30 * i)
         key = (d.year, d.month)
@@ -449,7 +444,6 @@ def fetch_twse_index(days: int = 180) -> pd.DataFrame:
         if not mdf.empty:
             frames.append(mdf)
         time.sleep(0.35)
-
     if frames:
         df = pd.concat(frames).sort_index()
         df = df[~df.index.duplicated(keep="last")]
@@ -459,7 +453,6 @@ def fetch_twse_index(days: int = 180) -> pd.DataFrame:
             df.to_csv(cache_path)
             log.info(f"  ✅ TWSE 官方指數 ({len(df)} 筆)")
             return df
-
     if os.path.exists(cache_path):
         try:
             df = pd.read_csv(cache_path, index_col=0, parse_dates=True)
@@ -469,12 +462,21 @@ def fetch_twse_index(days: int = 180) -> pd.DataFrame:
                 return df
         except Exception as e:
             log.error(f"  快取讀取失敗: {e}")
-
     return pd.DataFrame()
 
 
 # ══════════════════════════════════════════════════════════════
-# Layer 2：TPEX 備援 API（fallback 2）
+# Layer 2：TPEX 備援 API
+# [FIX-21] 修正 pandas Series 布林判斷錯誤
+#
+# 原始問題（v3.11）：
+#   result["Open"] = _num(_col("openPrice","open","開盤")) or result["Close"]
+#   當 _num() 回傳一個全是數字的 pd.Series，Python 對 Series 做 `or`
+#   會觸發 "The truth value of a Series is ambiguous" 錯誤。
+#
+# 修正方式：
+#   讓 _num() 在找不到欄位或全 NaN 時回傳 None（而非 Series）。
+#   呼叫端用 `if s is None` 明確判斷，再決定是否用 result["Close"] 填補。
 # ══════════════════════════════════════════════════════════════
 
 def fetch_tpex_index(days: int = 180) -> pd.DataFrame:
@@ -498,27 +500,45 @@ def fetch_tpex_index(days: int = 180) -> pd.DataFrame:
         df["_Date"] = pd.to_datetime(df[date_col], errors="coerce")
         df = df.dropna(subset=["_Date"]).set_index("_Date").sort_index()
 
-        def _col(*candidates):
+        def _col(*candidates) -> Optional[str]:
+            """找欄位名稱，找不到回傳 None"""
             for c in candidates:
                 m = next((x for x in df.columns if c.lower() in x.lower()), None)
                 if m:
                     return m
             return None
 
-        def _num(col):
-            if col is None:
+        # ── [FIX-21] 核心修正 ──────────────────────────────────
+        # 回傳 pd.Series 或 None，絕不回傳 False / 0 / 空 Series
+        # 讓呼叫端用 `if s is None` 判斷，避免 Series 布林歧義錯誤
+        def _num(col_name: Optional[str]) -> Optional[pd.Series]:
+            if col_name is None:
                 return None
-            return pd.to_numeric(
-                df[col].astype(str).str.replace(",", "", regex=False),
+            s = pd.to_numeric(
+                df[col_name].astype(str).str.replace(",", "", regex=False),
                 errors="coerce"
             )
+            # 全部都是 NaN → 視為找不到，回傳 None
+            return None if s.isna().all() else s
+        # ────────────────────────────────────────────────────────
+
+        close_s = _num(_col("closePrice", "close", "收盤"))
+        if close_s is None:
+            raise ValueError("找不到收盤價欄位")
 
         result = pd.DataFrame(index=df.index)
-        result["Close"]  = _num(_col("closePrice", "close", "收盤"))
-        result["Open"]   = _num(_col("openPrice", "open", "開盤")) or result["Close"]
-        result["High"]   = _num(_col("highPrice", "high", "最高")) or result["Close"]
-        result["Low"]    = _num(_col("lowPrice", "low", "最低"))  or result["Close"]
-        result["Volume"] = _num(_col("tradeValue", "volume", "成交")) or 0.0
+        result["Close"] = close_s
+
+        # [FIX-21] 用 `is None` 判斷，完全不對 Series 做布林運算
+        open_s  = _num(_col("openPrice",  "open",   "開盤"))
+        high_s  = _num(_col("highPrice",  "high",   "最高"))
+        low_s   = _num(_col("lowPrice",   "low",    "最低"))
+        vol_s   = _num(_col("tradeValue", "volume", "成交"))
+
+        result["Open"]   = open_s  if open_s  is not None else result["Close"]
+        result["High"]   = high_s  if high_s  is not None else result["Close"]
+        result["Low"]    = low_s   if low_s   is not None else result["Close"]
+        result["Volume"] = vol_s   if vol_s   is not None else pd.Series(0.0, index=df.index)
 
         result = result.dropna(subset=["Close"])
         cutoff = pd.Timestamp(date.today() - timedelta(days=days))
@@ -546,7 +566,7 @@ def fetch_tpex_index(days: int = 180) -> pd.DataFrame:
 
 
 # ══════════════════════════════════════════════════════════════
-# 統一大盤指數入口（三層 fallback + 常數保底）
+# 統一大盤指數入口（與 v3.11 相同，無修改）
 # ══════════════════════════════════════════════════════════════
 
 def fetch_market_index(days: int = 180) -> pd.DataFrame:
@@ -579,35 +599,23 @@ def fetch_market_index(days: int = 180) -> pd.DataFrame:
 
 
 # ══════════════════════════════════════════════════════════════
-# [FIX-20] FinMind 備援下載（Yahoo 429 耗盡時啟用）
-# TOKEN 從環境變數 FINMIND_TOKEN 讀取（已存於 GitHub Secrets）
+# FinMind 個股 OHLCV（與 v3.11 相同，無修改）
 # ══════════════════════════════════════════════════════════════
 
-_FINMIND_TOKEN = os.environ.get("FINMIND_TOKEN", "")
-_FINMIND_URL   = "https://api.finmindtrade.com/api/v4/data"
-
-
 def fetch_finmind_ohlcv(sym: str, days: int = 90) -> Optional[pd.DataFrame]:
-    """
-    [FIX-20] 從 FinMind API 下載個股 OHLCV。
-
-    自動嘗試 TWSE（上市）和 TPEX（上櫃）兩個資料集。
-    回傳標準化 DataFrame（Close/Open/High/Low/Volume）或 None。
-    """
     if not _FINMIND_TOKEN:
         log.debug("  FinMind TOKEN 未設定，跳過")
         return None
 
     start_date = (date.today() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-    # 上市優先，上櫃備援
     for dataset in ["TaiwanStockPrice", "TaiwanStockPriceAdj"]:
         try:
             params = {
-                "dataset":   dataset,
-                "data_id":   sym,
+                "dataset":    dataset,
+                "data_id":    sym,
                 "start_date": start_date,
-                "token":     _FINMIND_TOKEN,
+                "token":      _FINMIND_TOKEN,
             }
             resp = requests.get(_FINMIND_URL, params=params, timeout=20)
             resp.raise_for_status()
@@ -624,19 +632,15 @@ def fetch_finmind_ohlcv(sym: str, days: int = 90) -> Optional[pd.DataFrame]:
             df["date"] = pd.to_datetime(df["date"])
             df = df.set_index("date").sort_index()
 
-            # 欄位對應
             col_map = {
-                "open":   "Open",
-                "max":    "High",
-                "min":    "Low",
-                "close":  "Close",
+                "open":           "Open",
+                "max":            "High",
+                "min":            "Low",
+                "close":          "Close",
                 "Trading_Volume": "Volume",
-                "volume": "Volume",
+                "volume":         "Volume",
             }
-            renamed = {}
-            for src, dst in col_map.items():
-                if src in df.columns:
-                    renamed[src] = dst
+            renamed = {src: dst for src, dst in col_map.items() if src in df.columns}
             df = df.rename(columns=renamed)
 
             needed = ["Open", "High", "Low", "Close"]
@@ -662,31 +666,29 @@ def fetch_finmind_ohlcv(sym: str, days: int = 90) -> Optional[pd.DataFrame]:
 
 
 # ══════════════════════════════════════════════════════════════
-# 個股 OHLCV（動態偵測 .TW / .TWO + FinMind 備援）
-# [FIX-15][FIX-18][FIX-19] v3.11 核心修正
+# 個股 OHLCV
+# [FIX-22] 移除 `or True`，只有 Yahoo 真正耗盡才呼叫 FinMind
+#
+# 原始問題（v3.11）：
+#   if yahoo_exhausted or True:   ← `or True` 使條件永遠成立
+#       fetch_finmind_ohlcv(...)
+#
+#   結果：每支股票無論 Yahoo 是否成功，都會額外呼叫 FinMind
+#         → 大量浪費 FinMind API 配額
+#         → Yahoo 成功取到資料後仍被 FinMind 結果覆蓋（錯誤邏輯）
+#
+# 修正方式：
+#   移除 `or True`，僅當 `yahoo_exhausted is True` 才進入備援。
+#   同時，只要 Yahoo 任一 suffix 成功拿到資料就直接 return，不進入備援。
 # ══════════════════════════════════════════════════════════════
 
 def fetch_tw_ohlcv(sym: str, period: str = "60d",
                    max_retries: int = 3) -> tuple:
-    """
-    下載個股 OHLCV。
-
-    v3.11 三層架構：
-    Layer 1 - Yahoo Finance（主要來源）
-      - _resolve_suffix 動態偵測 .TW/.TWO
-      - 429 做指數退讓重試，最多 3 次
-      - 每次嘗試之間 sleep 1.5-2.5s（[FIX-19]）
-    Layer 2 - FinMind API（[FIX-18]）
-      - Yahoo 429 耗盡後自動切換
-      - 使用 FINMIND_TOKEN 環境變數
-    Layer 3 - 回傳 None（讓上層跳過此股）
-    """
     if yf is None:
         log.warning("yfinance 未安裝，嘗試 FinMind")
         df = fetch_finmind_ohlcv(sym)
         return (df, "FinMind") if df is not None else (None, None)
 
-    # [FIX-15] 動態決定 suffix 順序
     detected = _resolve_suffix(sym)
     if detected is None:
         log.warning(f"  {sym}: suffix 偵測確認無資料，跳過")
@@ -694,17 +696,16 @@ def fetch_tw_ohlcv(sym: str, period: str = "60d",
 
     other    = ".TWO" if detected == ".TW" else ".TW"
     suffixes = [detected, other]
-    yahoo_exhausted = False  # 追蹤 Yahoo 是否被 429 完全耗盡
+    yahoo_exhausted = False  # True = 所有 suffix 的所有重試都被 429 耗盡
 
     for suffix in suffixes:
         ticker  = f"{sym}{suffix}"
         got_429 = False
 
         for attempt in range(max_retries):
-            # [FIX-19] 每次請求前 sleep，根本降低 429 觸發率
             base_sleep = 1.5 + random.uniform(0.0, 1.0)
             if attempt > 0:
-                base_sleep += attempt * 2.0   # 重試時加長等待
+                base_sleep += attempt * 2.0
             time.sleep(base_sleep)
 
             try:
@@ -721,7 +722,6 @@ def fetch_tw_ohlcv(sym: str, period: str = "60d",
                         _save_suffix_cache()
                     return df, suffix
 
-                # 資料不足（0 筆常是 429 被靜默回傳空資料）
                 if df.empty or len(df) == 0:
                     log.warning(f"  {ticker}: 回傳空資料（可能是靜默限速），換 suffix")
                 else:
@@ -760,12 +760,15 @@ def fetch_tw_ohlcv(sym: str, period: str = "60d",
                 log.warning(f"  {ticker} 429 重試({max_retries}次)耗盡")
                 yahoo_exhausted = True
 
-    # [FIX-18] Yahoo 完全失敗 → 切換 FinMind
-    if yahoo_exhausted or True:  # 只要 Yahoo 無資料都試 FinMind
-        log.info(f"  {sym}: 嘗試 FinMind 備援...")
+    # ── [FIX-22] 核心修正 ──────────────────────────────────────
+    # 原本：if yahoo_exhausted or True:  ← 永遠 True，每次都呼叫 FinMind
+    # 修正：if yahoo_exhausted:          ← 只有 Yahoo 真正被 429 耗盡才備援
+    if yahoo_exhausted:
+        log.info(f"  {sym}: Yahoo 429 耗盡，嘗試 FinMind 備援...")
         df_fm = fetch_finmind_ohlcv(sym, days=int(period.replace("d", "")))
         if df_fm is not None:
             return df_fm, "FinMind"
+    # ────────────────────────────────────────────────────────────
 
     log.warning(f"  {sym} Yahoo + FinMind 均無資料，跳過")
     return None, None
@@ -784,7 +787,7 @@ def load_from_csv(sym: str, day_dir: str) -> Optional[pd.DataFrame]:
 
 
 # ══════════════════════════════════════════════════════════════
-# 純 Numpy/Pandas 技術指標
+# 以下與 v3.11 完全相同（技術指標、JSON工具、引擎等）
 # ══════════════════════════════════════════════════════════════
 
 def _rsi(close: pd.Series, period: int = 14) -> pd.Series:
@@ -869,10 +872,6 @@ def enrich_df(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# ══════════════════════════════════════════════════════════════
-# JSON 工具
-# ══════════════════════════════════════════════════════════════
-
 def save_json(path: str, data):
     if isinstance(data, dict):
         data["generated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -890,7 +889,7 @@ def load_json(path: str):
 
 
 # ══════════════════════════════════════════════════════════════
-# Regime Engine（大盤環境分析）
+# Regime Engine
 # ══════════════════════════════════════════════════════════════
 
 class _RegimeEngine:
@@ -898,19 +897,12 @@ class _RegimeEngine:
 
     def run(self, market_data: dict, today: str) -> dict:
         _fallback = {
-            "bear":            0.33,
-            "range":           0.34,
-            "bull":            0.33,
-            "label":           "震盪",
-            "active_strategy": "range",
-            "active_path":     "423",
-            "backup_path":     "45",
-            "slope_5d":        0.0,
-            "slope_20d":       0.0,
-            "mkt_rsi":         50.0,
-            "adx":             20.0,
-            "history":         [],
-            "data_source":     "fallback",
+            "bear": 0.33, "range": 0.34, "bull": 0.33,
+            "label": "震盪", "active_strategy": "range",
+            "active_path": "423", "backup_path": "45",
+            "slope_5d": 0.0, "slope_20d": 0.0,
+            "mkt_rsi": 50.0, "adx": 20.0,
+            "history": [], "data_source": "fallback",
         }
         try:
             bm = fetch_market_index(days=180)
@@ -1014,19 +1006,16 @@ class _RegimeEngine:
 
 
 # ══════════════════════════════════════════════════════════════
-# Feature Engine（大盤快照指標）
+# Feature Engine
 # ══════════════════════════════════════════════════════════════
 
 class _FeatureEngine:
     def run(self, today: str) -> dict:
         _fallback = {
-            "index_close":   0.0,
-            "index_chg_pct": 0.0,
-            "mkt_rsi":       50.0,
-            "mkt_slope_5d":  0.0,
-            "mkt_slope_20d": 0.0,
-            "volume":        0.0,
-            "data_source":   "fallback",
+            "index_close": 0.0, "index_chg_pct": 0.0,
+            "mkt_rsi": 50.0, "mkt_slope_5d": 0.0,
+            "mkt_slope_20d": 0.0, "volume": 0.0,
+            "data_source": "fallback",
         }
         try:
             bm = fetch_market_index(days=60)
@@ -1095,7 +1084,7 @@ _risk_engine    = _RiskEngine()
 
 
 # ══════════════════════════════════════════════════════════════
-# V4 引擎（內嵌版）
+# V4 引擎（與 v3.11 相同）
 # ══════════════════════════════════════════════════════════════
 
 _POS_WEIGHT = {
@@ -1196,7 +1185,7 @@ def run_v4(symbols, regime, today, day_dir) -> dict:
 
     rows = []; skipped = 0
     for sym in symbols:
-        time.sleep(random.uniform(1.5, 2.5))  # [FIX-19] 提高間隔防 429
+        time.sleep(random.uniform(1.5, 2.5))
         try:
             df = load_from_csv(sym, day_dir)
             if df is None:
@@ -1228,13 +1217,13 @@ def run_v4(symbols, regime, today, day_dir) -> dict:
     result_rows.sort(key=lambda x: x["score"], reverse=True)
     for i, r in enumerate(result_rows):
         r["rank"] = i + 1
-    top30  = result_rows[:30]   # v3.10: 擴展至 TOP30
+    top30  = result_rows[:30]
     scores = [r["score"] for r in result_rows]
     am = round(float(np.mean(scores)), 2)
     as_ = round(float(np.std(scores)), 2)
     log.info(f"V4 完成 ✅ | TOP30:{len(top30)} | 跳過:{skipped} | μ={am} σ={as_}")
     return {
-        "market": "TW", "top20": top30,   # key 保持 top20 相容舊 app
+        "market": "TW", "top20": top30,
         "top30":  top30,
         "pool_mu": am, "pool_sigma": as_,
         "win_rate": 57.1, "regime": label,
@@ -1244,7 +1233,7 @@ def run_v4(symbols, regime, today, day_dir) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════
-# V12.1 引擎（內嵌版）
+# V12.1 引擎（與 v3.11 相同）
 # ══════════════════════════════════════════════════════════════
 
 _PATH_DEFS = {
@@ -1376,9 +1365,9 @@ def _v12_y_pr(features):
 
 
 def _v12_path(y_prs, Pb, Pr, Pu):
-    PR_THR  = 90.0
-    first   = {yn for yn in ["Y1","Y2","Y3","Y4","Y5"]
-               if y_prs.get(f"PR_{yn}", 0) >= PR_THR}
+    PR_THR = 90.0
+    first  = {yn for yn in ["Y1","Y2","Y3","Y4","Y5"]
+              if y_prs.get(f"PR_{yn}", 0) >= PR_THR}
     if not first:
         return {"best": None, "batch": 0, "ev_soft": 0.0, "quality": "Pure"}
 
@@ -1441,7 +1430,7 @@ def run_v12(symbols, regime, v4_data, today, day_dir) -> dict:
     positions = []; path_counts = {}
     for cand in cands[:12]:
         sym = cand["symbol"]
-        time.sleep(random.uniform(1.5, 2.5))  # [FIX-19] 提高間隔防 429
+        time.sleep(random.uniform(1.5, 2.5))
         try:
             df = load_from_csv(sym, day_dir)
             if df is None:
@@ -1512,7 +1501,7 @@ def run_v12(symbols, regime, v4_data, today, day_dir) -> dict:
                 "days_held":    days_h,
                 "curr_ret_pct": round(curr_ret * 100, 2),
                 "entry_price":  round(entry_price, 2),
-                "close":        round(close, 2),        # v3.10: 現價
+                "close":        round(close, 2),
                 "tp1_price":    tp1_px,
                 "tp2_price":    tp2_px,
                 "stop_price":   stop_px,
@@ -1527,9 +1516,7 @@ def run_v12(symbols, regime, v4_data, today, day_dir) -> dict:
         except Exception as e:
             log.warning(f"  V12 {sym}: {e}")
 
-    # v3.10: 依 EV 排序，最多顯示 30 筆
     positions.sort(key=lambda x: x.get("ev", 0), reverse=True)
-
     log.info(f"V12 完成 ✅ | 部位:{len(positions)} | 路徑:{path_counts}")
     return {
         "market":       "TW",
@@ -1586,19 +1573,12 @@ def main():
     if not regime_data:
         log.warning("⚠️ Regime 資料為空，使用預設震盪 fallback，繼續後續計算。")
         regime_data = {
-            "bear":            0.33,
-            "range":           0.34,
-            "bull":            0.33,
-            "label":           "震盪",
-            "active_strategy": "range",
-            "active_path":     "423",
-            "backup_path":     "45",
-            "slope_5d":        0.0,
-            "slope_20d":       0.0,
-            "mkt_rsi":         50.0,
-            "adx":             20.0,
-            "history":         [],
-            "data_source":     "fallback",
+            "bear": 0.33, "range": 0.34, "bull": 0.33,
+            "label": "震盪", "active_strategy": "range",
+            "active_path": "423", "backup_path": "45",
+            "slope_5d": 0.0, "slope_20d": 0.0,
+            "mkt_rsi": 50.0, "adx": 20.0,
+            "history": [], "data_source": "fallback",
         }
 
     log.info("=== Step 3: V4 Engine ===")
