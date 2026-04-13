@@ -6,10 +6,11 @@
   "active_strategy": "bull",
   "active_path": "45",
   "backup_path": "423",
-  "slope_5d": 0.0422,
-  "slope_20d": -0.0009,
-  "mkt_rsi": 62.97,
-  "adx": 24.04,
+  "slope_5d": 0.0644,
+  "slope_20d": 0.0036,
+  "mkt_rsi": 61.93,
+  "adx": 22.83,
+  "index_close": 35328.05,
   "history": [
     {
       "month": "2026-04",
@@ -19,6 +20,7 @@
       "label": "牛市"
     }
   ],
-  "data_source": "FinMind_ETF_composite_0050_006208",
-  "generated_at": "2026-04-13 10:57"
+  "data_source": "FinMind_Y9999_TAIEX",
+  "run_mode": "intraday",
+  "generated_at": "2026-04-13 13:08"
 }

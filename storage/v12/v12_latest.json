@@ -2,24 +2,6 @@
   "market": "TW",
   "positions": [
     {
-      "symbol": "5469",
-      "path": "45",
-      "ev": 4.48,
-      "ev_tier": "🔥主力",
-      "action": "持有",
-      "exit_signal": "—",
-      "quality": "Pure",
-      "days_held": 1,
-      "curr_ret_pct": 0.0,
-      "entry_price": 90.1,
-      "close": 90.1,
-      "tp1_price": 108.1,
-      "tp2_price": 115.3,
-      "stop_price": 84.3,
-      "regime": "bull",
-      "batch": 2
-    },
-    {
       "symbol": "2382",
       "path": "45",
       "ev": 4.48,
@@ -27,7 +9,7 @@
       "action": "持有",
       "exit_signal": "—",
       "quality": "Pure",
-      "days_held": 2,
+      "days_held": 3,
       "curr_ret_pct": 0.0,
       "entry_price": 321.5,
       "close": 321.5,
@@ -35,25 +17,46 @@
       "tp2_price": 411.5,
       "stop_price": 307.1,
       "regime": "bull",
-      "batch": 1
+      "batch": 1,
+      "is_watchlist": true
     },
     {
-      "symbol": "6285",
+      "symbol": "2303",
       "path": "45",
       "ev": 4.48,
       "ev_tier": "🔥主力",
-      "action": "持有",
+      "action": "進場",
       "exit_signal": "—",
       "quality": "Pure",
-      "days_held": 1,
+      "days_held": 0,
       "curr_ret_pct": 0.0,
-      "entry_price": 225.5,
-      "close": 225.5,
-      "tp1_price": 270.6,
-      "tp2_price": 288.6,
-      "stop_price": 205.2,
+      "entry_price": 62.0,
+      "close": 62.0,
+      "tp1_price": 74.4,
+      "tp2_price": 79.4,
+      "stop_price": 57.9,
       "regime": "bull",
-      "batch": 1
+      "batch": 1,
+      "is_watchlist": false
+    },
+    {
+      "symbol": "3706",
+      "path": "45",
+      "ev": 4.48,
+      "ev_tier": "🔥主力",
+      "action": "進場",
+      "exit_signal": "—",
+      "quality": "Pure",
+      "days_held": 0,
+      "curr_ret_pct": 0.0,
+      "entry_price": 83.0,
+      "close": 83.0,
+      "tp1_price": 99.6,
+      "tp2_price": 106.2,
+      "stop_price": 78.9,
+      "regime": "bull",
+      "batch": 2,
+      "is_watchlist": false
     }
   ],
   "stats": {
@@ -72,5 +75,6 @@
   "path_counts": {
     "45": 3
   },
-  "generated_at": "2026-04-13 11:00"
+  "run_mode": "intraday",
+  "generated_at": "2026-04-13 13:09"
 }
