@@ -9,7 +9,7 @@
       "action": "持有",
       "exit_signal": "—",
       "quality": "Pure",
-      "days_held": 3,
+      "days_held": 4,
       "curr_ret_pct": 0.0,
       "entry_price": 321.5,
       "close": 321.5,
@@ -25,10 +25,10 @@
       "path": "45",
       "ev": 4.48,
       "ev_tier": "🔥主力",
-      "action": "進場",
+      "action": "持有",
       "exit_signal": "—",
       "quality": "Pure",
-      "days_held": 0,
+      "days_held": 1,
       "curr_ret_pct": 0.0,
       "entry_price": 62.0,
       "close": 62.0,
@@ -44,10 +44,10 @@
       "path": "45",
       "ev": 4.48,
       "ev_tier": "🔥主力",
-      "action": "進場",
+      "action": "持有",
       "exit_signal": "—",
       "quality": "Pure",
-      "days_held": 0,
+      "days_held": 1,
       "curr_ret_pct": 0.0,
       "entry_price": 83.0,
       "close": 83.0,
@@ -76,5 +76,5 @@
     "45": 3
   },
   "run_mode": "intraday",
-  "generated_at": "2026-04-13 13:09"
+  "generated_at": "2026-04-13 13:44"
 }
