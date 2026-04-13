@@ -27,12 +27,12 @@ env:
   TZ: Asia/Taipei
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
-# ── 3. 防止多個工作流衝突 (關鍵1) ──────────────────────
+# ── 3. 防止多個工作流衝突 ──────────────────────────────────
 concurrency:
   group: stock-data
   cancel-in-progress: false
 
-# ── 4. 計算任務 (整合為單一 Jobs 區塊) ────────────────────
+# ── 4. 計算任務 ────────────────────────────────────────────
 jobs:
   compute:
     runs-on: ubuntu-latest
@@ -46,17 +46,21 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: 同步最新版本（避免衝突）
-        run: git pull --rebase origin main || echo "No remote changes"
+      # ── 2. 同步最新版本 ──
+      - name: 同步最新版本
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main || echo "No remote changes"
 
-      # ── 2. 設定 Python ──
+      # ── 3. 設定 Python ──
       - name: 安裝 Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
 
-      # ── 3. 安裝依賴 (不裝 pandas_ta) ──
+      # ── 4. 安裝依賴 ──
       - name: 安裝依賴項
         run: |
           pip install --upgrade pip
@@ -69,13 +73,13 @@ jobs:
             "requests==2.32.3" \
             "finmind"
 
-      # ── 4. 準備儲存目錄 ──
+      # ── 5. 準備儲存目錄 ──
       - name: 準備儲存目錄
         run: |
           mkdir -p storage/{v4,v12,regime,market,logs,cache}
           mkdir -p data
 
-      # ── 5. 清除快取 ──
+      # ── 6. 清除快取 ──
       - name: 清除過期 suffix 快取
         shell: python
         run: |
@@ -90,7 +94,7 @@ jobs:
                   with open(file_path, 'w', encoding='utf-8') as f:
                       json.dump(cleaned, f, indent=2, ensure_ascii=False)
 
-      # ── 6. 判斷執行模式 ──
+      # ── 7. 判斷執行模式 ──
       - name: 判斷執行模式
         run: |
           TW_HOUR=$(date +"%H")
@@ -101,12 +105,12 @@ jobs:
             echo "RUN_MODE=postmarket" >> $GITHUB_ENV
           fi
 
-      # ── 7. 驗證 Token ──
+      # ── 8. 驗證 Token ──
       - name: 驗證 FinMind TOKEN
         run: |
           python -c "import os; print('TOKEN OK' if os.environ.get('FINMIND_TOKEN') else 'NO TOKEN')"
 
-      # ── 8. 運行計算 ──
+      # ── 9. 運行計算 ──
       - name: 運行計算
         id: compute_run
         run: python jobs/daily_run.py
@@ -118,7 +122,7 @@ jobs:
           sleep 90
           python jobs/daily_run.py
 
-      # ── 9. 運行部位管理 ──
+      # ── 10. 運行部位管理 ──
       - name: 運行 portfolio_manager.py
         run: |
           if [ -f engine/portfolio_manager.py ]; then
@@ -127,16 +131,16 @@ jobs:
             echo "Skipping portfolio_manager.py (File not found)"
           fi
 
-      # ── 10. 提交與推送 ──
+      # ── 11. 提交與推送（修正：先 stash 再 pull，避免 unstaged 衝突）──
       - name: 提交變更
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
+
           git add storage/ data/ stock_set.json holdings.json streamlit_display.json 2>/dev/null || true
-          
+
           if git diff --staged --quiet; then
-            echo "無變更"
+            echo "無變更，跳過 commit"
           else
             git commit -m "📊 Auto: $(date '+%Y-%m-%d %H:%M') UTC"
           fi
@@ -145,6 +149,14 @@ jobs:
         run: |
           for i in 1 2 3
           do
-            git pull --rebase origin main
-            git push && break || sleep 10
+            echo "=== 推送嘗試 $i ==="
+            # stash 未追蹤的暫存變更，以免 rebase 失敗
+            git stash --include-untracked || true
+            git pull --rebase origin main || true
+            git stash pop || true
+
+            git push && break || {
+              echo "推送失敗，等待 10 秒後重試..."
+              sleep 10
+            }
           done
