@@ -1,8 +1,7 @@
-name: 資源法 Daily Compute
+name: 資源法每日計算
 
 on:
   workflow_dispatch:
-
   schedule:
     # 09:30 台灣 = 01:30 UTC
     - cron: "30 1 * * 1-5"
@@ -14,11 +13,9 @@ on:
     - cron: "30 6 * * 1-5"
     # 15:30 台灣 = 07:30 UTC（盤後收盤結算）
     - cron: "30 7 * * 1-5"
-    # 18:00 台灣 = 10:00 UTC（日結存檔）
-    - cron: "0 10 * * 1-5"
-    # 20:50 台灣 = 12:50 UTC（日結存檔）
-    - cron: "50 12 * * 1-5"
-
+    # 20:00 台灣 = 12:00 UTC（日結文件）
+    - cron: "0 12 * * 1-5"
+  
 jobs:
   compute:
     runs-on: ubuntu-latest
@@ -26,26 +23,28 @@ jobs:
 
     env:
       TZ: Asia/Taipei
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      # [FIX-2] 強制所有 actions 使用 Node.js 24，消除棄用警告
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
     steps:
-      # ── 1. Checkout 程式碼 ──────────────────────────────────
-      - name: Checkout Repository
-        uses: actions/checkout@v4.2.2
+      # ── 1. 檢出儲存庫 ────────────────────────────────────────
+      - name: 檢出儲存庫
+        uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 1
 
-      # ── 2. 設定 Python ─────────────────────────────────────
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v5.4.0
+      # ── 2. 設定 Python ──────────────────────────────────────
+      - name: 安裝 Python 3.11
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
 
-      # ── 3. 安裝依賴 ────────────────────────────────────────
-      # ✅ 修正：移除 pandas-ta（daily_run.py 未使用）
-      - name: Install Dependencies
+      # ── 3. 安裝依賴 ──────────────────────────────────────────
+      # [FIX-21] 加入 finmind（FinMind 為主要資料來源）
+      # 移除 pandas-ta（daily_run.py 不需要）
+      - name: 安裝依賴項
         run: |
           pip install --upgrade pip
           pip install \
@@ -54,20 +53,22 @@ jobs:
             "numpy>=1.26.4,<2.0" \
             "scipy==1.13.1" \
             "pyarrow==16.1.0" \
-            "requests==2.32.3"
+            "requests==2.32.3" \
+            "finmind"
 
-      # ── 4. 確認 storage / data 目錄存在 ────────────────────
-      - name: Prepare Storage Directories
+      # ── 4. 確認儲存/資料目錄存在 ──────────────────────────
+      - name: 準備儲存目錄
         run: |
           mkdir -p storage/v4
           mkdir -p storage/v12
           mkdir -p storage/regime
           mkdir -p storage/market
           mkdir -p storage/logs
+          mkdir -p storage/cache
           mkdir -p data
 
-      # ── 5. 執行主計算流程 ───────────────────────────────────
-      - name: Run Daily Compute
+      # ── 5. 執行主計算流程 ──────────────────────────────────
+      - name: 運行每日計算
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -75,26 +76,23 @@ jobs:
           echo "🕐 台灣時間: $(TZ=Asia/Taipei date)"
           python daily_run.py
 
-      # ── 6. 提交更新後的 JSON / CSV 到 GitHub ───────────────
-      - name: Commit & Push Storage Updates
+      # ── 6. 提交更新後的 JSON / CSV 到 GitHub ──────────────
+      - name: 提交並推送儲存更新
         run: |
-          git config user.name  "github-actions[bot]"
+          git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
           git add storage/ data/
-
           if git diff --staged --quiet; then
-            echo "ℹ️ 無資料變更，跳過 commit"
+            echo "ℹ️ 無資料變更，跳過提交"
           else
             TIMESTAMP=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M")
-            git commit -m "🤖 Auto-update: ${TIMESTAMP} 台灣時間"
+            git commit -m "🤖 自動更新: ${TIMESTAMP} 台灣時間"
             git push
             echo "✅ 資料已推送至 GitHub"
           fi
 
-      # ── 7. 失敗通知 ─────────────────────────────────────────
-      - name: Notify on Failure
+      # ── 7. 失敗通知 ──────────────────────────────────────
+      - name: 失敗通知
         if: failure()
         run: |
           echo "❌ 計算流程失敗，請檢查 Actions 日誌"
-          # 可接入 Slack / Line 通知
