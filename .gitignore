@@ -1,23 +1,29 @@
-import pandas as pd
-import os
+# === Python 環境與快取 ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
 
-def save_raw_data_as_json(df_list, symbol_list):
-    """
-    將抓取到的 150 檔原始資料存為 JSON，確保能上傳至 GitHub
-    """
-    base_path = "storage/market"
-    if not os.path.exists(base_path):
-        os.makedirs(base_path)
-    
-    # 建議存成一個大檔案，避免 GitHub 檔案過多
-    market_data = {}
-    for df, symbol in zip(df_list, symbol_list):
-        # 轉換為 dict 格式存儲
-        market_data[symbol] = df.to_dict(orient='records')
-    
-    # 存成 JSON 格式
-    import json
-    with open(f"{base_path}/full_market_data.json", 'w', encoding='utf-8') as f:
-        json.dump(market_data, f, ensure_ascii=False, indent=4)
-    
-    print(f"✅ 已將 150 檔原始數據存至 {base_path}/full_market_data.json")
+# === Streamlit 相關 ===
+.streamlit/
+
+# === 數據存儲策略 ===
+# 1. 先排除所有 CSV 原始檔（節省 GitHub 空間，150 檔 CSV 太大且會被擋）
+*.csv
+
+# 2. 確保資料夾結構被 Git 追蹤
+!storage/
+!storage/market/
+!storage/v12/
+!storage/v4/
+!storage/regime/
+
+# 3. 確保 JSON 檔案絕對不會被過濾（這是網頁數據來源）
+!*.json
+
+# 4. 如果您有特定的本地測試檔不想上傳，可以在下面單獨列出
+# alpha_seeds.json
