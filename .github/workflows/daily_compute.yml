@@ -1,5 +1,6 @@
 name: 資源法每日計算 v4.0
 
+# ── 1. 觸發條件 (整合手動與定時) ───────────────────────────
 on:
   workflow_dispatch:
     inputs:
@@ -8,92 +9,54 @@ on:
         required: false
         default: 'auto'
   schedule:
-    # ── 盤中：台灣時間 09:32 = UTC 01:35（開盤後5分）
+    # ── 盤中：台灣時間 09:32 = UTC 01:32
     - cron: "32 1 * * 1-5"
-    # ── 盤中：台灣時間 10:31 = UTC 02:30
+    # ── 盤中：台灣時間 10:31 = UTC 02:31
     - cron: "31 2 * * 1-5"
-    # ── 盤中：台灣時間 11:28 = UTC 04:30
+    # ── 盤中：台灣時間 11:28 = UTC 03:28
     - cron: "28 3 * * 1-5"
-       # ── 盤後：台灣時間 18:00 = UTC 12:00（日結存檔）
+    # ── 盤後：台灣時間 18:00 = UTC 10:00
     - cron: "0 10 * * 1-5"
 
-
-workflow_dispatch:          # 手動觸發
- 
+# ── 2. 環境變數 ──────────────────────────────────────────
 env:
   FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   GITHUB_OWNER: ${{ github.repository_owner }}
   GITHUB_REPO: ${{ github.event.repository.name }}
- 
-jobs:
-  daily-compute:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
- 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
- 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
- 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
- 
-      - name: Run daily_run.py (主運算)
-        run: python jobs/daily_run.py
- 
-      - name: Run portfolio_manager.py (買賣決策)
-        run: python engine/portfolio_manager.py
- 
-      - name: Commit & Push storage updates
-        run: |
-          git config --global user.email "actions@github.com"
-          git config --global user.name  "GitHub Actions"
-          git add storage/ -f
-          git diff --staged --quiet || git commit -m "📊 Auto: $(date -u '+%Y-%m-%d %H:%M') UTC"
-          git push
+  TZ: Asia/Taipei
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
-# ✅ 防止多 workflow 同時寫入（關鍵1）
+# ── 3. 防止多個工作流同時寫入 (關鍵1) ──────────────────────
 concurrency:
   group: stock-data
   cancel-in-progress: false
 
+# ── 4. 計算任務 ──────────────────────────────────────────
 jobs:
   compute:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
-    env:
-      TZ: Asia/Taipei
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
     steps:
-      # ── 1. 檢出儲存庫 ────────────────────────────────────────
+      # ── 1. 檢出儲存庫 ──
       - name: 檢出儲存庫
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0   # ✅ 必改（讓 rebase 可用）
+          fetch-depth: 0  # ✅ 關鍵2：讓 rebase 可用
 
-      # ✅ 關鍵2：先同步遠端（避免舊版本 push）
       - name: 同步最新版本（避免衝突）
         run: git pull --rebase origin main || echo "No remote changes"
 
-      # ── 2. 設定 Python ──────────────────────────────────────
+      # ── 2. 設定 Python ──
       - name: 安裝 Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
 
-      # ── 3. 安裝依賴 ──────────────────────────────────────────
+      # ── 3. 安裝依賴 ──
       - name: 安裝依賴項
         run: |
           pip install --upgrade pip
@@ -104,15 +67,16 @@ jobs:
             "scipy==1.13.1" \
             "pyarrow==16.1.0" \
             "requests==2.32.3" \
-            "finmind"
+            "finmind" \
+            "pandas_ta"
 
-      # ── 4. 準備儲存目錄 ─────────────────────────────────────
+      # ── 4. 準備目錄 ──
       - name: 準備儲存目錄
         run: |
-          mkdir -p storage/{v4,v12,regime,market,logs,cache}
+          mkdir -p storage/{v4,v12,regime,market,logs,cache} engine/
           mkdir -p data
 
-      # ── 5. 清除過期 suffix 快取 ─────────────────────────────
+      # ── 5. 清除快取 ──
       - name: 清除過期 suffix 快取
         shell: python
         run: |
@@ -120,95 +84,70 @@ jobs:
           file_path = 'storage/cache/suffix_cache.json'
           if os.path.exists(file_path):
               with open(file_path, 'r', encoding='utf-8') as f:
-                  try:
-                      cache = json.load(f)
-                  except json.JSONDecodeError:
-                      print("⚠️ 快取格式損壞，略過")
-                      cache = {}
+                  try: cache = json.load(f)
+                  except: cache = {}
               if cache:
                   cleaned = {k: v for k, v in cache.items() if v is not None}
-                  removed = len(cache) - len(cleaned)
                   with open(file_path, 'w', encoding='utf-8') as f:
                       json.dump(cleaned, f, indent=2, ensure_ascii=False)
-                  print(f"✅ 清除 {removed} 筆 null suffix 快取")
-              else:
-                  print("ℹ️ 快取為空")
-          else:
-              print("ℹ️ 無 suffix 快取，跳過")
+                  print(f"✅ 已清理快取")
 
-      # ── 6. 判斷執行模式 ──────────────────────────
+      # ── 6. 判斷執行模式 ──
       - name: 判斷執行模式
         run: |
-          TW_HOUR=$(TZ=Asia/Taipei date +"%H")
-          echo "台灣時間: $(TZ=Asia/Taipei date)"
-          echo "台灣時間小時: ${TW_HOUR}"
+          TW_HOUR=$(date +"%H")
           if [ "$TW_HOUR" -ge 9 ] && [ "$TW_HOUR" -le 14 ]; then
             echo "RUN_MODE=intraday" >> $GITHUB_ENV
-            echo "📈 執行模式: 盤中"
           else
             echo "RUN_MODE=postmarket" >> $GITHUB_ENV
-            echo "📊 執行模式: 盤後"
           fi
 
-      # ── 7. 驗證 FinMind TOKEN ────────────────────────────────
+      # ── 7. 驗證 Token ──
       - name: 驗證 FinMind TOKEN
-        env:
-          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
-        continue-on-error: true
-        shell: python
         run: |
-          import requests, os
-          token = os.environ.get('FINMIND_TOKEN', '')
-          print("TOKEN OK" if token else "NO TOKEN")
+          python -c "import os; print('TOKEN OK' if os.environ.get('FINMIND_TOKEN') else 'NO TOKEN')"
 
-      # ── 8. 主計算 ───────────────────────────────────────
-      - name: 運行計算
+      # ── 8. 運行主計算 (V4/V12) ──
+      - name: 運行 daily_run.py
         id: compute_run
-        env:
-          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: |
-          echo "🕐 台灣時間: $(TZ=Asia/Taipei date)"
-          echo "📋 模式: $RUN_MODE"
-          python daily_run.py
+        run: python daily_run.py
         continue-on-error: true
 
-      # ── 9. Retry ─────────────────────────────
-      - name: 重試
+      - name: 重試主計算
         if: steps.compute_run.outcome == 'failure'
         run: |
           sleep 90
           python daily_run.py
 
-      # ── 10. Commit ──────────────────────────────────
+      # ── 9. 運行部位管理 (買賣決策原因) ──
+      - name: 運行 portfolio_manager.py
+        run: |
+          if [ -f engine/portfolio_manager.py ]; then
+            python engine/portfolio_manager.py
+          else
+            echo "Skipping portfolio_manager.py (File not found)"
+          fi
+
+      # ── 10. 提交與推送 ──
       - name: 提交變更
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add storage/ data/ stock_set.json
-
+          git add storage/ data/ stock_set.json holdings.json streamlit_display.json 2>/dev/null || true
+          
           if git diff --staged --quiet; then
             echo "無變更"
           else
-            git commit -m "🤖 自動更新: $(TZ=Asia/Taipei date '+%Y-%m-%d %H:%M')"
+            git commit -m "🤖 自動更新: $(date '+%Y-%m-%d %H:%M')"
           fi
 
-      # ✅ 關鍵3：push 前再同步（避免中途衝突）
-      - name: 再次同步（防衝突）
-        run: git pull --rebase origin main || echo "No changes"
-
-      # ✅ 關鍵4：push 加 retry（最終保險）
-      - name: 推送（帶重試）
+      - name: 推送變更 (帶重試機制)
         run: |
           for i in 1 2 3
           do
-            git push && break
-            echo "⚠️ push 失敗，重試 $i"
-            sleep 10
             git pull --rebase origin main
+            git push && break || (echo "Push failed, retry $i" && sleep 10)
           done
 
-      # ── 11. 完成 ─────────────────────────────
       - name: 完成
-        run: echo "✅ 完成 $(TZ=Asia/Taipei date)"
+        run: echo "✅ 完成任務於 $(date)"
