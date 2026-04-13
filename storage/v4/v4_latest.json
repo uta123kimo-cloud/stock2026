@@ -1024,12 +1024,12 @@
       "rank": 30
     }
   ],
-  "pool_mu": 68.11,
+  "pool_mu": 68.13,
   "pool_sigma": 13.72,
   "win_rate": 57.1,
   "regime": "牛市",
   "total_scored": 155,
   "skipped": 1,
   "run_mode": "postmarket",
-  "generated_at": "2026-04-13 15:26"
+  "generated_at": "2026-04-13 20:03"
 }
