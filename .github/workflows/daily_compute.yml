@@ -68,8 +68,7 @@ jobs:
             "pyarrow==16.1.0" \
             "requests==2.32.3" \
             "finmind" \
-            "pandas_ta"
-
+           
       # ── 4. 準備目錄 ──
       - name: 準備儲存目錄
         run: |
