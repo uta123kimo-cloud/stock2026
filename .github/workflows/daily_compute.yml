@@ -65,14 +65,14 @@ jobs:
       # 根本原因：Yahoo 429 時誤將 suffix 快取成 None，
       # 導致下次執行時 FinMind 路徑被跳過。
       # 每次執行前清除所有 null 值，強制重新偵測。
+     # ── 清除過期 suffix 快取 ──────────────────────────────
       - name: 清除過期 suffix 快取
         shell: python
         run: |
           import json
           import os
-
-          file_path = 'storage/cache/suffix_cache.json'
           
+          file_path = 'storage/cache/suffix_cache.json'
           if os.path.exists(file_path):
               with open(file_path, 'r', encoding='utf-8') as f:
                   try:
@@ -84,22 +84,19 @@ jobs:
               if cache:
                   cleaned = {k: v for k, v in cache.items() if v is not None}
                   removed = len(cache) - len(cleaned)
-                  
                   with open(file_path, 'w', encoding='utf-8') as f:
                       json.dump(cleaned, f, indent=4, ensure_ascii=False)
-                  
-                  print(f"✅ 清除 {removed} 筆 null suffix 快取（Yahoo 429 誤判殘留）")
-                  print(f"📊 目前保留 {len(cleaned)} 筆有效快取")
+                  print(f"✅ 清除 {removed} 筆 null suffix 快取")
               else:
                   print("ℹ️ 快取內容為空，無需清理")
           else:
               print("ℹ️ 無 suffix 快取檔，跳過清理")
+
       # ── 6. [FIX-B] 驗證 FinMind TOKEN 可用性 ──────────────
-      # 確保 TOKEN 存在且 API 可連線，若失敗不中止（降級 Yahoo）
       - name: 驗證 FinMind TOKEN 可用性
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
-        continue-on-error: true  # 確保驗證失敗時不會中斷整個運算流程
+        continue-on-error: true
         shell: python
         run: |
           import requests
@@ -107,12 +104,11 @@ jobs:
           import sys
 
           token = os.environ.get('FINMIND_TOKEN')
-
           if not token:
               print("⚠️ FINMIND_TOKEN 未設定，系統將降級使用 Yahoo Finance 備援。")
           else:
               print(f"✅ FINMIND_TOKEN 已設定（長度: {len(token)}）")
-              
+                          
               # 執行 API 連通性測試
               try:
                   url = 'https://api.finmindtrade.com/api/v4/data'
