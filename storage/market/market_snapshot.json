@@ -1,11 +1,10 @@
 {
-  "index_close": 132.8881604034171,
+  "market": "TW",
+  "index_close": 152.29,
   "index_chg_pct": 1.95,
-  "mkt_rsi": 62.731118590884556,
-  "mkt_slope_5d": 6.9616,
-  "mkt_slope_20d": 3.2979,
-  "volume": 76457090.1,
-  "data_source": "ETF_composite_0050_006208",
-  "generated_at": "2026-04-12 20:22",
-  "date": "2026-04-12"
+  "mkt_rsi": 62.97,
+  "mkt_slope_5d": 0.0422,
+  "mkt_slope_20d": -0.0009,
+  "data_source": "FinMind_ETF_composite_0050_006208",
+  "generated_at": "2026-04-13 10:56"
 }

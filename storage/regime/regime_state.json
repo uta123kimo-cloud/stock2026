@@ -1,25 +1,24 @@
 {
-  "bear": 0.1838,
-  "range": 0.2453,
-  "bull": 0.5709,
+  "bear": 0.0,
+  "range": 0.3,
+  "bull": 0.7,
   "label": "牛市",
   "active_strategy": "bull",
   "active_path": "45",
   "backup_path": "423",
-  "slope_5d": 0.0696,
-  "slope_20d": 0.033,
-  "mkt_rsi": 63.0,
-  "adx": 15.4,
+  "slope_5d": 0.0422,
+  "slope_20d": -0.0009,
+  "mkt_rsi": 62.97,
+  "adx": 24.04,
   "history": [
     {
       "month": "2026-04",
-      "bear": 0.244,
-      "range": 0.2843,
-      "bull": 0.4717,
-      "label": "偏多震盪"
+      "bear": 0.0,
+      "range": 0.3,
+      "bull": 0.7,
+      "label": "牛市"
     }
   ],
-  "data_source": "ETF_composite_0050_006208",
-  "generated_at": "2026-04-12 20:22",
-  "date": "2026-04-12"
+  "data_source": "FinMind_ETF_composite_0050_006208",
+  "generated_at": "2026-04-13 10:57"
 }
