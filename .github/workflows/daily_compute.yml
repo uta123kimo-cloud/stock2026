@@ -17,6 +17,49 @@ on:
        # ── 盤後：台灣時間 18:00 = UTC 12:00（日結存檔）
     - cron: "0 10 * * 1-5"
 
+
+workflow_dispatch:          # 手動觸發
+ 
+env:
+  FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+  GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+  GITHUB_OWNER: ${{ github.repository_owner }}
+  GITHUB_REPO: ${{ github.event.repository.name }}
+ 
+jobs:
+  daily-compute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+ 
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+ 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+ 
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+ 
+      - name: Run daily_run.py (主運算)
+        run: python jobs/daily_run.py
+ 
+      - name: Run portfolio_manager.py (買賣決策)
+        run: python engine/portfolio_manager.py
+ 
+      - name: Commit & Push storage updates
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name  "GitHub Actions"
+          git add storage/ -f
+          git diff --staged --quiet || git commit -m "📊 Auto: $(date -u '+%Y-%m-%d %H:%M') UTC"
+          git push
+
 # ✅ 防止多 workflow 同時寫入（關鍵1）
 concurrency:
   group: stock-data
