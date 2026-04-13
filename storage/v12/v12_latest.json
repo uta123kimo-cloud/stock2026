@@ -9,7 +9,7 @@
       "action": "持有",
       "exit_signal": "—",
       "quality": "Pure",
-      "days_held": 4,
+      "days_held": 5,
       "curr_ret_pct": 0.0,
       "entry_price": 321.5,
       "close": 321.5,
@@ -28,7 +28,7 @@
       "action": "持有",
       "exit_signal": "—",
       "quality": "Pure",
-      "days_held": 1,
+      "days_held": 2,
       "curr_ret_pct": 0.0,
       "entry_price": 62.0,
       "close": 62.0,
@@ -47,7 +47,7 @@
       "action": "持有",
       "exit_signal": "—",
       "quality": "Pure",
-      "days_held": 1,
+      "days_held": 2,
       "curr_ret_pct": 0.0,
       "entry_price": 83.0,
       "close": 83.0,
@@ -76,5 +76,5 @@
     "45": 3
   },
   "run_mode": "intraday",
-  "generated_at": "2026-04-13 13:44"
+  "generated_at": "2026-04-13 13:49"
 }
