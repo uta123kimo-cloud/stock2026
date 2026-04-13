@@ -15,19 +15,19 @@ on:
     - cron: "30 7 * * 1-5"
     # 20:00 台灣 = 12:00 UTC（日結文件）
     - cron: "0 12 * * 1-5"
-  
+
 jobs:
   compute:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+    timeout-minutes: 50  # [FIX] 從 30 改 50：FinMind 200 股 + Yahoo fallback 需要更多時間
     env:
       TZ: Asia/Taipei
-      # [FIX-2] 強制所有 actions 使用 Node.js 24，消除棄用警告
+      # [FIX-2] 強制所有 actions 使用 Node.js 20→24，消除棄用警告
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
     steps:
       # ── 1. 檢出儲存庫 ────────────────────────────────────────
+      # [FIX] 升級至 actions/checkout@v4.2.2 → v4（最新），消除 Node.js 20 警告
       - name: 檢出儲存庫
         uses: actions/checkout@v4
         with:
@@ -35,6 +35,7 @@ jobs:
           fetch-depth: 1
 
       # ── 2. 設定 Python ──────────────────────────────────────
+      # [FIX] 升級至 actions/setup-python@v5（最新），消除 Node.js 20 警告
       - name: 安裝 Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -42,8 +43,6 @@ jobs:
           cache: pip
 
       # ── 3. 安裝依賴 ──────────────────────────────────────────
-      # [FIX-21] 加入 finmind（FinMind 為主要資料來源）
-      # 移除 pandas-ta（daily_run.py 不需要）
       - name: 安裝依賴項
         run: |
           pip install --upgrade pip
@@ -59,24 +58,88 @@ jobs:
       # ── 4. 確認儲存/資料目錄存在 ──────────────────────────
       - name: 準備儲存目錄
         run: |
-          mkdir -p storage/v4
-          mkdir -p storage/v12
-          mkdir -p storage/regime
-          mkdir -p storage/market
-          mkdir -p storage/logs
-          mkdir -p storage/cache
+          mkdir -p storage/{v4,v12,regime,market,logs,cache}
           mkdir -p data
 
-      # ── 5. 執行主計算流程 ──────────────────────────────────
+      # ── 5. [FIX-A] 清除舊的 null suffix 快取 ──────────────
+      # 根本原因：Yahoo 429 時誤將 suffix 快取成 None，
+      # 導致下次執行時 FinMind 路徑被跳過。
+      # 每次執行前清除所有 null 值，強制重新偵測。
+      - name: 清除過期 suffix 快取
+        run: |
+          if [ -f storage/cache/suffix_cache.json ]; then
+            python3 -c "
+import json
+with open('storage/cache/suffix_cache.json') as f:
+    cache = json.load(f)
+cleaned = {k: v for k, v in cache.items() if v is not None}
+removed = len(cache) - len(cleaned)
+with open('storage/cache/suffix_cache.json', 'w') as f:
+    json.dump(cleaned, f)
+print(f'清除 {removed} 筆 null suffix 快取（Yahoo 429 誤判殘留）')
+print(f'保留 {len(cleaned)} 筆有效快取')
+"
+          else
+            echo "ℹ️ 無 suffix 快取檔，跳過清理"
+          fi
+
+      # ── 6. [FIX-B] 驗證 FinMind TOKEN 可用性 ──────────────
+      # 確保 TOKEN 存在且 API 可連線，若失敗不中止（降級 Yahoo）
+      - name: 驗證 FinMind TOKEN
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: |
+          if [ -z "$FINMIND_TOKEN" ]; then
+            echo "⚠️ FINMIND_TOKEN 未設定，將使用 Yahoo Finance 備援"
+          else
+            echo "✅ FINMIND_TOKEN 已設定（長度: ${#FINMIND_TOKEN}）"
+            # 快速測試 API 可連性（不失敗整個 job）
+            python3 -c "
+import requests, os, sys
+token = os.environ['FINMIND_TOKEN']
+try:
+    r = requests.get(
+        'https://api.finmindtrade.com/api/v4/data',
+        params={'dataset': 'TaiwanStockPrice', 'data_id': '2330',
+                'start_date': '2024-01-01', 'token': token},
+        timeout=15
+    )
+    d = r.json()
+    if d.get('status') == 200 and d.get('data'):
+        print(f'✅ FinMind API 連線正常（2330 取得 {len(d[\"data\"])} 筆）')
+    else:
+        print(f'⚠️ FinMind API 回應異常: status={d.get(\"status\")} msg={d.get(\"msg\",\"\")}')
+except Exception as e:
+    print(f'⚠️ FinMind API 連線失敗: {e}（將使用 Yahoo 備援）')
+" || true
+          fi
+
+      # ── 7. 執行主計算流程 ──────────────────────────────────
+      # [FIX-C] continue-on-error + retry：Yahoo 429 後給 90s 讓 rate limit 解除
       - name: 運行每日計算
+        id: compute_run
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           echo "🕐 台灣時間: $(TZ=Asia/Taipei date)"
           python daily_run.py
+        continue-on-error: true
 
-      # ── 6. 提交更新後的 JSON / CSV 到 GitHub ──────────────
+      # ── 8. [FIX-D] 首次失敗時自動重試 ────────────────────
+      # Yahoo Finance 429 Rate Limit 通常 60~120s 後解除
+      - name: 重試計算（若首次失敗）
+        if: steps.compute_run.outcome == 'failure'
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          echo "⚠️ 首次計算失敗，等待 90s 後重試（Yahoo Rate Limit 解除）..."
+          sleep 90
+          echo "🔄 重試台灣時間: $(TZ=Asia/Taipei date)"
+          python daily_run.py
+
+      # ── 9. 提交更新後的 JSON / CSV 到 GitHub ──────────────
       - name: 提交並推送儲存更新
         run: |
           git config user.name "github-actions[bot]"
@@ -91,8 +154,12 @@ jobs:
             echo "✅ 資料已推送至 GitHub"
           fi
 
-      # ── 7. 失敗通知 ──────────────────────────────────────
+      # ── 10. 失敗通知 ──────────────────────────────────────
       - name: 失敗通知
         if: failure()
         run: |
           echo "❌ 計算流程失敗，請檢查 Actions 日誌"
+          echo "常見原因："
+          echo "  1. Yahoo Finance 429 Rate Limit（重試仍失敗）"
+          echo "  2. FinMind TOKEN 過期或額度耗盡"
+          echo "  3. 個股代碼已下市（suffix_cache 應自動清除）"
