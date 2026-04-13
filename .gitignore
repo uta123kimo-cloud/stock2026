@@ -13,7 +13,12 @@ venv/
 
 # === 數據存儲策略 ===
 # 1. 先排除所有 CSV 原始檔（節省 GitHub 空間，150 檔 CSV 太大且會被擋）
+__pycache__/
+.streamlit/
 *.csv
+# ✅ 放行數據資料夾與 JSON
+!storage/
+!storage/**/*.json
 
 # 2. 確保資料夾結構被 Git 追蹤
 !storage/
@@ -22,8 +27,4 @@ venv/
 !storage/v4/
 !storage/regime/
 
-# 3. 確保 JSON 檔案絕對不會被過濾（這是網頁數據來源）
-!*.json
 
-# 4. 如果您有特定的本地測試檔不想上傳，可以在下面單獨列出
-# alpha_seeds.json
