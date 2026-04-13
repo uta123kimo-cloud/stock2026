@@ -213,7 +213,7 @@ def _finmind_rate_limit() -> None:
     _FINMIND_LAST_REQUEST = time.time()
 
 
-def fetch_finmind_ohlcv(sym: str, days: int = 90) -> Optional[pd.DataFrame]:
+def fetch_finmind_ohlcv(sym: str, days: int = 250) -> Optional[pd.DataFrame]:
     """
     [FIX-21][FIX-25][FIX-33] 從 FinMind API 下載個股 OHLCV。
     - 只使用 TaiwanStockPrice（速度更快）
@@ -299,7 +299,7 @@ _ETF_WEIGHTS = {
 }
 
 
-def fetch_finmind_etf_composite(days: int = 180) -> pd.DataFrame:
+def fetch_finmind_etf_composite(days: int = 250) -> pd.DataFrame:
     """[FIX-26] 用 FinMind 下載 0050 + 006208 合成大盤。"""
     if not _USE_FINMIND:
         return pd.DataFrame()
