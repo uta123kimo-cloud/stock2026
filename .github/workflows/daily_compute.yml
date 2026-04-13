@@ -66,23 +66,34 @@ jobs:
       # 導致下次執行時 FinMind 路徑被跳過。
       # 每次執行前清除所有 null 值，強制重新偵測。
       - name: 清除過期 suffix 快取
+        shell: python
         run: |
-          if [ -f storage/cache/suffix_cache.json ]; then
-            python3 -c "
-import json
-with open('storage/cache/suffix_cache.json') as f:
-    cache = json.load(f)
-cleaned = {k: v for k, v in cache.items() if v is not None}
-removed = len(cache) - len(cleaned)
-with open('storage/cache/suffix_cache.json', 'w') as f:
-    json.dump(cleaned, f)
-print(f'清除 {removed} 筆 null suffix 快取（Yahoo 429 誤判殘留）')
-print(f'保留 {len(cleaned)} 筆有效快取')
-"
-          else
-            echo "ℹ️ 無 suffix 快取檔，跳過清理"
-          fi
+          import json
+          import os
 
+          file_path = 'storage/cache/suffix_cache.json'
+          
+          if os.path.exists(file_path):
+              with open(file_path, 'r', encoding='utf-8') as f:
+                  try:
+                      cache = json.load(f)
+                  except json.JSONDecodeError:
+                      print("⚠️ 快取檔案格式損壞，略過清理")
+                      cache = {}
+
+              if cache:
+                  cleaned = {k: v for k, v in cache.items() if v is not None}
+                  removed = len(cache) - len(cleaned)
+                  
+                  with open(file_path, 'w', encoding='utf-8') as f:
+                      json.dump(cleaned, f, indent=4, ensure_ascii=False)
+                  
+                  print(f"✅ 清除 {removed} 筆 null suffix 快取（Yahoo 429 誤判殘留）")
+                  print(f"📊 目前保留 {len(cleaned)} 筆有效快取")
+              else:
+                  print("ℹ️ 快取內容為空，無需清理")
+          else:
+              print("ℹ️ 無 suffix 快取檔，跳過清理")
       # ── 6. [FIX-B] 驗證 FinMind TOKEN 可用性 ──────────────
       # 確保 TOKEN 存在且 API 可連線，若失敗不中止（降級 Yahoo）
       - name: 驗證 FinMind TOKEN
