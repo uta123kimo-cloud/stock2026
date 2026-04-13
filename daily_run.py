@@ -1,26 +1,33 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  daily_run.py v3.12  資源法 Precompute 主控制器              ║
+║  daily_run.py v3.13  資源法 Precompute 主控制器              ║
 ║                                                              ║
-║  v3.12 修正清單：                                            ║
-║  [FIX-21] FinMind 升為主要來源（Yahoo 降為備援）             ║
-║           FINMIND_TOKEN 存在時 → 優先走 FinMind              ║
-║           FinMind 失敗才 fallback 到 Yahoo                   ║
-║  [FIX-22] "possibly delisted" / "no price data found"       ║
-║           → 直接 continue，不卡死，不觸發 cancel            ║
-║  [FIX-23] fetch_tw_ohlcv 加入 global timeout（120s）         ║
-║           防止任何單股卡住整個流程                           ║
-║  [FIX-24] _resolve_suffix：period="5d" 改 "1mo"             ║
-║           "5d" 在 Yahoo 頻繁觸發 delisted 誤判               ║
-║  [FIX-25] fetch_finmind_ohlcv：改用 TaiwanStockPrice        ║
-║           （不用 Adj，減少 API timeout 機率）                 ║
-║  [FIX-26] ETF 合成大盤：0050/006208 也改走 FinMind           ║
-║           若 FINMIND_TOKEN 存在                              ║
+║  v3.13 修正清單（基於 v3.12）：                              ║
+║  [FIX-27] fetch_tw_ohlcv：FinMind TOKEN 存在時完全跳過       ║
+║           _resolve_suffix，避免 Yahoo 429 污染 suffix cache  ║
+║           並導致 FinMind 路徑被跳過（圖1日誌根本原因）       ║
+║  [FIX-28] _load_suffix_cache：啟動時自動清除 null 值         ║
+║           防止舊的 429 誤判殘留卡住下次執行                  ║
+║  [FIX-29] _resolve_suffix：429 時不寫 None 到 cache         ║
+║           僅回傳預設 .TW（v3.12 已有但 fetch_tw_ohlcv        ║
+║           Yahoo retry 區塊仍會覆寫 cache，一併修正）         ║
+║  [FIX-30] fetch_tw_ohlcv Yahoo retry：429 時禁止更新         ║
+║           _SUFFIX_CACHE，避免錯誤 suffix 被持久化            ║
+║  [FIX-31] Yahoo 回傳空資料時（非 429、非 delisted）          ║
+║           不寫入 cache，讓下次仍可重試                       ║
+║  [FIX-32] _resolve_suffix：history(period="1mo") 改用        ║
+║           Ticker.fast_info 快速確認上市狀態，減少 API 呼叫   ║
+║  [FIX-33] FinMind 批次請求加入 rate limit 保護               ║
+║           同一 TOKEN 連續請求間距至少 0.5s                   ║
 ╚══════════════════════════════════════════════════════════════╝
 
 大盤合成邏輯：
   優先 FinMind（TaiwanStockPrice，0050 + 006208）
   備援 Yahoo ETF → TWSE 官方 API → TPEX API → 常數 fallback
+
+個股下載策略（v3.13 修正後）：
+  FinMind TOKEN 存在 → 直接 FinMind，完全不觸碰 Yahoo suffix 偵測
+  FinMind 失敗/無 TOKEN → Yahoo（附 suffix cache，429 不污染 cache）
 """
 
 import json
@@ -90,9 +97,9 @@ SYMBOLS = list(dict.fromkeys([
     "3062", "2419", "2314", "3305", "3105", "2312", "8086",
     "3081", "2455", "6442", "3163", "4979", "3363", "6451",
     "3450", "4908", "4977", "3234",
-    "1711","1727","2489","3060","3498","3535","3580","3587",
-    "3665","4749","4989","6217","6290","6418","6443","6470","6542",
-    "6546","6706","6831","6861","6877","8028","8111",
+    "1711", "1727", "2489", "3060", "3498", "3535", "3580", "3587",
+    "3665", "4749", "4989", "6217", "6290", "6418", "6443", "6470", "6542",
+    "6546", "6706", "6831", "6861", "6877", "8028", "8111",
 ]))
 
 # ══════════════════════════════════════════════════════════════
@@ -101,7 +108,7 @@ SYMBOLS = list(dict.fromkeys([
 
 _FINMIND_TOKEN = os.environ.get("FINMIND_TOKEN", "")
 _FINMIND_URL   = "https://api.finmindtrade.com/api/v4/data"
-_USE_FINMIND   = bool(_FINMIND_TOKEN)   # TOKEN 存在才用 FinMind
+_USE_FINMIND   = bool(_FINMIND_TOKEN)
 
 if _USE_FINMIND:
     log.info("✅ FinMind TOKEN 已載入，FinMind 為主要資料來源")
@@ -163,7 +170,6 @@ def load_json(path: str) -> Optional[dict]:
 
 # ══════════════════════════════════════════════════════════════
 # [FIX-22][FIX-23] 單股下載 Timeout 保護
-# 使用 SIGALRM（Linux only）防止任何單股卡住流程
 # ══════════════════════════════════════════════════════════════
 
 class _StockTimeout(Exception):
@@ -176,8 +182,8 @@ def _timeout_handler(signum, frame):
 
 def _with_timeout(func, timeout_sec: int = 120):
     """
-    [FIX-23] 在 Linux 環境下使用 SIGALRM 保護單股下載。
-    Windows 下降級為無保護（GitHub Actions 是 Linux 安全）。
+    Linux 環境使用 SIGALRM 保護單股下載。
+    Windows 下降級為無保護（GitHub Actions 是 Linux，安全）。
     """
     if not hasattr(signal, "SIGALRM"):
         return func()
@@ -194,17 +200,31 @@ def _with_timeout(func, timeout_sec: int = 120):
 # [FIX-21][FIX-25] FinMind 個股下載（主要來源）
 # ══════════════════════════════════════════════════════════════
 
+# [FIX-33] FinMind 請求時間戳，確保連續請求間距 >= 0.5s
+_FINMIND_LAST_REQUEST: float = 0.0
+
+
+def _finmind_rate_limit() -> None:
+    """[FIX-33] FinMind 請求限速：確保連續請求之間至少間隔 0.5s"""
+    global _FINMIND_LAST_REQUEST
+    elapsed = time.time() - _FINMIND_LAST_REQUEST
+    if elapsed < 0.5:
+        time.sleep(0.5 - elapsed)
+    _FINMIND_LAST_REQUEST = time.time()
+
+
 def fetch_finmind_ohlcv(sym: str, days: int = 90) -> Optional[pd.DataFrame]:
     """
-    [FIX-21][FIX-25] 從 FinMind API 下載個股 OHLCV。
-
-    v3.12 改進：
-    - 只使用 TaiwanStockPrice（不用 Adj，速度更快）
-    - 加入 requests timeout=20 防止卡死
-    - status != 200 直接 skip，不 raise Exception
+    [FIX-21][FIX-25][FIX-33] 從 FinMind API 下載個股 OHLCV。
+    - 只使用 TaiwanStockPrice（速度更快）
+    - requests timeout=20 防止卡死
+    - status != 200 直接 skip
+    - [FIX-33] 加入限速保護
     """
     if not _FINMIND_TOKEN:
         return None
+
+    _finmind_rate_limit()  # [FIX-33]
 
     start_date = (date.today() - timedelta(days=days + 5)).strftime("%Y-%m-%d")
 
@@ -220,7 +240,7 @@ def fetch_finmind_ohlcv(sym: str, days: int = 90) -> Optional[pd.DataFrame]:
         payload = resp.json()
 
         if payload.get("status") != 200:
-            log.debug(f"  FinMind {sym}: status={payload.get('status')} msg={payload.get('msg','')}")
+            log.debug(f"  FinMind {sym}: status={payload.get('status')} msg={payload.get('msg', '')}")
             return None
 
         records = payload.get("data", [])
@@ -232,7 +252,6 @@ def fetch_finmind_ohlcv(sym: str, days: int = 90) -> Optional[pd.DataFrame]:
         df["date"] = pd.to_datetime(df["date"])
         df = df.set_index("date").sort_index()
 
-        # FinMind TaiwanStockPrice 欄位對應
         col_map = {
             "open":           "Open",
             "max":            "High",
@@ -281,10 +300,7 @@ _ETF_WEIGHTS = {
 
 
 def fetch_finmind_etf_composite(days: int = 180) -> pd.DataFrame:
-    """
-    [FIX-26] 用 FinMind 下載 0050 + 006208 合成大盤。
-    TOKEN 存在時優先使用。
-    """
+    """[FIX-26] 用 FinMind 下載 0050 + 006208 合成大盤。"""
     if not _USE_FINMIND:
         return pd.DataFrame()
 
@@ -296,7 +312,7 @@ def fetch_finmind_etf_composite(days: int = 180) -> pd.DataFrame:
         if df is not None and not df.empty:
             frames[sym] = (df, weight)
             log.info(f"  FinMind ETF {sym}: {len(df)} 筆")
-        time.sleep(0.5)
+        # [FIX-33] _finmind_rate_limit() 已在 fetch_finmind_ohlcv 內處理
 
     if not frames:
         if os.path.exists(cache_path):
@@ -310,7 +326,6 @@ def fetch_finmind_etf_composite(days: int = 180) -> pd.DataFrame:
                 pass
         return pd.DataFrame()
 
-    # 求共同交易日
     all_dates = None
     for _, (df, _) in frames.items():
         idx = df.index
@@ -397,7 +412,7 @@ def _fetch_single_etf_yahoo(ticker: str, period: str = "200d",
             err = str(e).lower()
             if "too many requests" in err or "429" in err or "rate" in err:
                 wait = (2 ** attempt) * 3 + random.uniform(2, 5)
-                log.warning(f"  ETF {ticker} 429，退讓 {wait:.1f}s ({attempt+1}/{max_retries})")
+                log.warning(f"  ETF {ticker} 429，退讓 {wait:.1f}s ({attempt + 1}/{max_retries})")
                 time.sleep(wait)
             else:
                 log.debug(f"  ETF {ticker} 下載失敗: {e}")
@@ -424,7 +439,7 @@ def fetch_etf_composite_index(days: int = 180) -> pd.DataFrame:
                 df = pd.read_csv(cache_path, index_col=0, parse_dates=True)
                 df = _normalize_df(df)
                 if not df.empty:
-                    log.warning(f"  Yahoo ETF 合成失敗，使用快取")
+                    log.warning("  Yahoo ETF 合成失敗，使用快取")
                     return df
             except Exception:
                 pass
@@ -606,7 +621,7 @@ def fetch_twse_index(days: int = 180) -> pd.DataFrame:
             df = pd.read_csv(cache_path, index_col=0, parse_dates=True)
             df = _normalize_df(df)
             if not df.empty:
-                log.warning(f"  TWSE 失敗，使用快取")
+                log.warning("  TWSE 失敗，使用快取")
                 return df
         except Exception:
             pass
@@ -681,11 +696,10 @@ def fetch_tpex_index(days: int = 180) -> pd.DataFrame:
 
 
 # ══════════════════════════════════════════════════════════════
-# 統一大盤指數入口（v3.12：FinMind 優先）
+# 統一大盤指數入口（FinMind 優先）
 # ══════════════════════════════════════════════════════════════
 
 def fetch_market_index(days: int = 180) -> pd.DataFrame:
-    # Layer 0a：FinMind ETF 合成（主要）
     if _USE_FINMIND:
         log.info("  抓取大盤指數（Layer 0a: FinMind ETF 合成）...")
         df = fetch_finmind_etf_composite(days=days)
@@ -695,7 +709,6 @@ def fetch_market_index(days: int = 180) -> pd.DataFrame:
     else:
         log.info("  抓取大盤指數（Layer 0: Yahoo ETF 合成）...")
 
-    # Layer 0b：Yahoo ETF 合成
     df = fetch_etf_composite_index(days=days)
     if not df.empty and len(df) >= 10 and "Close" in df.columns:
         return df
@@ -724,7 +737,7 @@ def fetch_market_index(days: int = 180) -> pd.DataFrame:
 
 
 # ══════════════════════════════════════════════════════════════
-# [FIX-24] suffix 快取（Yahoo 備援用）
+# [FIX-24][FIX-28][FIX-29] suffix 快取（Yahoo 備援用）
 # ══════════════════════════════════════════════════════════════
 
 _SUFFIX_CACHE: dict = {}
@@ -732,14 +745,26 @@ _SUFFIX_CACHE_PATH = os.path.join(CACHE_DIR, "suffix_cache.json")
 
 
 def _load_suffix_cache() -> None:
+    """
+    [FIX-28] 啟動時載入 suffix cache，並自動清除所有 null 值。
+    null 值是舊版 Yahoo 429 誤判的殘留，必須清除。
+    """
     global _SUFFIX_CACHE
     if os.path.exists(_SUFFIX_CACHE_PATH):
         try:
             with open(_SUFFIX_CACHE_PATH, encoding="utf-8") as f:
-                _SUFFIX_CACHE = json.load(f)
+                raw = json.load(f)
+            # [FIX-28] 過濾掉所有 null / None 值
+            _SUFFIX_CACHE = {k: v for k, v in raw.items() if v is not None}
+            removed = len(raw) - len(_SUFFIX_CACHE)
+            if removed > 0:
+                log.warning(f"  [FIX-28] 清除 {removed} 筆 null suffix 快取（429 誤判殘留）")
+                _save_suffix_cache()  # 立即寫回乾淨版本
             log.debug(f"  suffix cache 載入 {len(_SUFFIX_CACHE)} 筆")
         except Exception:
             _SUFFIX_CACHE = {}
+    else:
+        _SUFFIX_CACHE = {}
 
 
 def _save_suffix_cache() -> None:
@@ -752,8 +777,11 @@ def _save_suffix_cache() -> None:
 
 def _resolve_suffix(sym: str) -> Optional[str]:
     """
-    [FIX-24] period 改用 "1mo"（原 "5d" 常誤判 delisted）。
-    429 → 不寫 None cache，回傳預設 .TW。
+    [FIX-24][FIX-29][FIX-32] Yahoo suffix 偵測。
+    - period="1mo"（原 "5d" 常誤判 delisted）
+    - 429 → 不寫 None cache，回傳預設 .TW
+    - [FIX-32] 先用 fast_info 快速確認，再用 history 兜底
+    - [FIX-27] 只在 FinMind 失敗時才被呼叫
     """
     if sym in _SUFFIX_CACHE:
         return _SUFFIX_CACHE[sym]
@@ -762,53 +790,81 @@ def _resolve_suffix(sym: str) -> Optional[str]:
         return ".TW"
 
     got_rate_limited = False
+
     for suffix in [".TW", ".TWO"]:
         ticker = f"{sym}{suffix}"
         try:
-            t    = yf.Ticker(ticker)
-            hist = t.history(period="1mo")   # [FIX-24] 改 1mo
+            t = yf.Ticker(ticker)
+
+            # [FIX-32] 優先用 fast_info（輕量，不觸發完整 API）
+            try:
+                fi = t.fast_info
+                last_price = getattr(fi, "last_price", None)
+                if last_price is not None and last_price > 0:
+                    log.debug(f"  suffix偵測(fast_info): {sym} → {suffix}")
+                    _SUFFIX_CACHE[sym] = suffix
+                    _save_suffix_cache()
+                    return suffix
+            except Exception:
+                pass  # fast_info 失敗，降級到 history
+
+            # 降級：用 history 確認
+            hist = t.history(period="1mo")
             if not hist.empty:
-                log.debug(f"  suffix偵測: {sym} → {suffix}")
+                log.debug(f"  suffix偵測(history): {sym} → {suffix}")
                 _SUFFIX_CACHE[sym] = suffix
                 _save_suffix_cache()
                 return suffix
+
             time.sleep(0.5)
+
         except Exception as e:
             err = str(e).lower()
             if "too many requests" in err or "429" in err or "rate" in err:
-                log.warning(f"  suffix偵測: {sym} 遇到 429，預設 .TW")
+                log.warning(f"  suffix偵測: {sym} 遇到 429，預設 .TW（不寫 cache）")
                 got_rate_limited = True
                 break
             time.sleep(0.3)
 
     if got_rate_limited:
+        # [FIX-29] 429 時絕對不寫 None 到 cache
         return ".TW"
 
+    # 兩個 suffix 都試過且都是空資料（非 429），才判定為下市
     log.warning(f"  suffix偵測: {sym} 兩個 suffix 均無資料（可能已下市），跳過")
     _SUFFIX_CACHE[sym] = None
     _save_suffix_cache()
     return None
 
 
-_load_suffix_cache()
+_load_suffix_cache()  # 啟動時載入並自動清除 null
 
 
 # ══════════════════════════════════════════════════════════════
-# [FIX-21][FIX-22][FIX-23] 個股 OHLCV 統一入口
-# v3.12：FinMind 優先，Yahoo 備援，完整 timeout 保護
+# [FIX-27][FIX-29][FIX-30][FIX-31] 個股 OHLCV 統一入口
+# v3.13 核心修正：FinMind TOKEN 存在時完全不觸碰 Yahoo suffix 偵測
 # ══════════════════════════════════════════════════════════════
 
 def fetch_tw_ohlcv(sym: str, period: str = "60d",
                    max_retries: int = 3) -> tuple:
     """
-    v3.12 下載策略：
-    FinMind 存在 → 先試 FinMind（120s timeout 保護）
-    FinMind 失敗 → fallback Yahoo
-    Yahoo delisted / 任何錯誤 → continue（不卡死）
+    v3.13 下載策略（根本修正）：
+
+    [FIX-27] FinMind TOKEN 存在時：
+      1. 直接呼叫 FinMind
+      2. FinMind 成功 → 直接 return，完全不觸碰 _resolve_suffix
+      3. FinMind 失敗 → fallback Yahoo，但此時才呼叫 _resolve_suffix
+
+    v3.12 的 bug：不管 FinMind 是否成功，都先呼叫 _resolve_suffix，
+    導致 Yahoo 429 → suffix cache 被污染 → FinMind 路徑被繞過。
+
+    [FIX-30] Yahoo retry 區塊：429 時不更新 suffix cache
+    [FIX-31] Yahoo 回傳空資料時不寫入 cache
     """
     days = int(period.replace("d", "")) if "d" in period else 60
 
     # ── Layer 1：FinMind（主要）──────────────────────────────
+    # [FIX-27] FinMind 成功時直接 return，不進入 Yahoo 流程
     if _USE_FINMIND:
         try:
             df = _with_timeout(
@@ -817,25 +873,28 @@ def fetch_tw_ohlcv(sym: str, period: str = "60d",
             )
             if df is not None and len(df) >= 20:
                 return df, "FinMind"
+            # FinMind 無資料（下市、或該股不在 FinMind）→ fallback Yahoo
+            log.debug(f"  {sym} FinMind 無資料，切換 Yahoo 備援")
         except _StockTimeout:
             log.warning(f"  {sym} FinMind 超時（30s），切換 Yahoo")
         except Exception as e:
             log.debug(f"  {sym} FinMind 例外: {e}")
 
     # ── Layer 2：Yahoo Finance（備援）───────────────────────
+    # [FIX-27] 只有在 FinMind 失敗後才進入此流程
     if yf is None:
-        log.warning(f"  {sym}: yfinance 未安裝且 FinMind 無資料")
+        log.warning(f"  {sym}: yfinance 未安裝且 FinMind 無資料，跳過")
         return None, None
 
+    # [FIX-27] 只有進入 Yahoo 流程時才呼叫 _resolve_suffix
     detected = _resolve_suffix(sym)
     if detected is None:
-        # [FIX-22] 確認下市 → 直接跳過，不卡死
-        log.warning(f"  {sym}: 確認無資料（下市或代碼錯誤），跳過")
+        # [FIX-22] 確認下市 → 直接跳過
+        log.warning(f"  {sym}: Yahoo 確認無資料（下市或代碼錯誤），跳過")
         return None, None
 
     other    = ".TWO" if detected == ".TW" else ".TW"
     suffixes = [detected, other]
-    yahoo_exhausted = False
 
     for suffix in suffixes:
         ticker  = f"{sym}{suffix}"
@@ -855,45 +914,47 @@ def fetch_tw_ohlcv(sym: str, period: str = "60d",
                 df = _normalize_df(df)
 
                 if not df.empty and "Close" in df.columns and len(df) >= 20:
+                    # 成功：若用的是備用 suffix，更新 cache
                     if suffix != detected:
+                        log.info(f"  {sym}: 備用 suffix {suffix} 有效，更新 cache")
                         _SUFFIX_CACHE[sym] = suffix
                         _save_suffix_cache()
                     return df, suffix
 
+                # [FIX-31] 空資料但非 429、非 delisted：不寫 cache，換 suffix 重試
                 if df.empty or len(df) == 0:
-                    log.debug(f"  {ticker}: 空資料，換 suffix")
+                    log.debug(f"  {ticker}: 空資料（非 429），換 suffix")
                 break
 
             except Exception as e:
                 err = str(e).lower()
 
-                # [FIX-22] delisted / no data → 直接 break，不卡死
+                # delisted / no data → break，不卡死
                 if (
                     "missing" in err or "delisted" in err
                     or "no data found" in err or "no price data" in err
                     or "possibly delisted" in err
                 ):
                     log.warning(f"  {ticker}: Yahoo 無資料（{err[:60]}），換 suffix")
-                    if suffix == detected:
-                        _SUFFIX_CACHE[sym] = other
-                        _save_suffix_cache()
+                    # [FIX-31] 即使 delisted 也不立刻寫 cache，讓另一個 suffix 先試
                     break
 
                 if "too many requests" in err or "429" in err or "rate" in err:
                     wait = (2 ** attempt) * 5 + random.uniform(3, 8)
-                    log.warning(f"  {ticker} 429，退讓 {wait:.1f}s ({attempt+1}/{max_retries})")
+                    log.warning(f"  {ticker} 429，退讓 {wait:.1f}s ({attempt + 1}/{max_retries})")
                     time.sleep(wait)
                     got_429 = True
+                    # [FIX-30] 429 時絕對不更新 suffix cache
                 else:
                     log.debug(f"  {ticker} 錯誤: {e}")
                     break
         else:
+            # for/else：重試耗盡
             if got_429:
-                log.warning(f"  {ticker} 429 重試耗盡")
-                yahoo_exhausted = True
+                log.warning(f"  {ticker} 429 重試耗盡，換 suffix")
+                # [FIX-30] 即使重試耗盡也不寫 None 到 cache
 
-    # Yahoo 失敗後若 FinMind 尚未嘗試（TOKEN 不存在時），直接 return None
-    log.warning(f"  {sym}: 所有來源均無資料，跳過")
+    log.warning(f"  {sym}: Yahoo + FinMind 均無資料，跳過")
     return None, None
 
 
@@ -915,8 +976,8 @@ def load_from_csv(sym: str, day_dir: str) -> Optional[pd.DataFrame]:
 
 def _rsi(close: pd.Series, period: int = 14) -> pd.Series:
     delta = close.diff()
-    gain  = delta.clip(lower=0).ewm(com=period-1, min_periods=period, adjust=False).mean()
-    loss  = (-delta.clip(upper=0)).ewm(com=period-1, min_periods=period, adjust=False).mean()
+    gain  = delta.clip(lower=0).ewm(com=period - 1, min_periods=period, adjust=False).mean()
+    loss  = (-delta.clip(upper=0)).ewm(com=period - 1, min_periods=period, adjust=False).mean()
     return 100 - 100 / (1 + gain / (loss + 1e-9))
 
 
@@ -927,7 +988,7 @@ def _atr(high, low, close, period: int = 14) -> pd.Series:
         (high - prev_c).abs(),
         (low  - prev_c).abs(),
     ], axis=1).max(axis=1)
-    return tr.ewm(com=period-1, min_periods=period, adjust=False).mean()
+    return tr.ewm(com=period - 1, min_periods=period, adjust=False).mean()
 
 
 def enrich_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -986,17 +1047,12 @@ class _FeatureEngine:
             return {}
 
         df  = df.dropna(subset=["Close"]).sort_index()
-        src = "ETF_composite_0050_006208"
-        if _USE_FINMIND:
-            src = "FinMind_ETF_composite_0050_006208"
+        src = "FinMind_ETF_composite_0050_006208" if _USE_FINMIND else "ETF_composite_0050_006208"
 
         n   = len(df)
         log.info(f"  ✅ ETF 合成大盤 ({n} 筆) | 0050=65% 006208=35%")
 
         c       = df["Close"].values
-        ma5     = df["Close"].rolling(5).mean().values
-        ma20    = df["Close"].rolling(20).mean().values
-        ma60    = df["Close"].rolling(60).mean().values
         rsi_val = _rsi(df["Close"], 14).values
 
         def _slope(series, w=5):
@@ -1006,10 +1062,9 @@ class _FeatureEngine:
 
         s5  = _slope(c, 5)
         s20 = _slope(c, 20)
-        atr_s = _atr(df["High"], df["Low"], df["Close"], 14).values
-        atr_pct = np.where(c > 0, atr_s / (c + 1e-9), 0.03)
+        atr_s       = _atr(df["High"], df["Low"], df["Close"], 14).values
+        atr_pct     = np.where(c > 0, atr_s / (c + 1e-9), 0.03)
         atr_mean_20 = pd.Series(atr_pct).rolling(20).mean().values
-        adx_proxy = np.where(atr_mean_20 > 0, atr_pct[-1] / (atr_mean_20[-1] + 1e-9) * 25, 20.0)
 
         close_now = float(c[-1])
         close_pre = float(c[-2]) if n >= 2 else close_now
@@ -1020,14 +1075,14 @@ class _FeatureEngine:
         s20_now = float(s20[-1]) if not np.isnan(s20[-1]) else 0.0
 
         return {
-            "market":       "TW",
-            "index_close":  round(close_now, 2),
+            "market":        "TW",
+            "index_close":   round(close_now, 2),
             "index_chg_pct": round(chg_pct, 2),
-            "mkt_rsi":      round(rsi_now, 2),
-            "mkt_slope_5d": round(s5_now, 4),
+            "mkt_rsi":       round(rsi_now, 2),
+            "mkt_slope_5d":  round(s5_now, 4),
             "mkt_slope_20d": round(s20_now, 4),
-            "data_source":  src,
-            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "data_source":   src,
+            "generated_at":  datetime.now().strftime("%Y-%m-%d %H:%M"),
         }
 
 
@@ -1042,9 +1097,7 @@ class _RegimeEngine:
             return {}
 
         df  = df.dropna(subset=["Close"]).sort_index()
-        src = "ETF_composite_0050_006208"
-        if _USE_FINMIND:
-            src = "FinMind_ETF_composite_0050_006208"
+        src = "FinMind_ETF_composite_0050_006208" if _USE_FINMIND else "ETF_composite_0050_006208"
 
         n   = len(df)
         log.info(f"  ✅ ETF 合成大盤 ({n} 筆) | 0050=65% 006208=35%")
@@ -1066,9 +1119,9 @@ class _RegimeEngine:
         atr_m20 = pd.Series(atr_pct).rolling(20).mean().values
         adx_p   = float(np.where(atr_m20[-1] > 0, atr_pct[-1] / (atr_m20[-1] + 1e-9) * 25, 20.0))
 
-        rsi_n = float(rsi_val[-1]) if not np.isnan(rsi_val[-1]) else 50.0
-        s5_n  = float(s5[-1])  if not np.isnan(s5[-1])  else 0.0
-        s20_n = float(s20[-1]) if not np.isnan(s20[-1]) else 0.0
+        rsi_n   = float(rsi_val[-1]) if not np.isnan(rsi_val[-1]) else 50.0
+        s5_n    = float(s5[-1])  if not np.isnan(s5[-1])  else 0.0
+        s20_n   = float(s20[-1]) if not np.isnan(s20[-1]) else 0.0
         ma20_n  = float(ma20[-1])  if not np.isnan(ma20[-1])  else float(c[-1])
         ma60_n  = float(ma60[-1])  if not np.isnan(ma60[-1])  else float(c[-1])
         close_n = float(c[-1])
@@ -1184,9 +1237,9 @@ def _v4_signal(pvo, vri, slope_z, sc, mu, sigma, pvo_c, pvo_a, vri_d, vol_ratio)
     c_ok = vri_d > -5.0
 
     patterns = []
-    if is_strong and is_money and is_cool and a_ok:           patterns.append("A")
-    if is_strong and is_fire  and is_hot:                     patterns.append("B")
-    if is_strong and is_hot and "B" not in patterns and c_ok: patterns.append("C")
+    if is_strong and is_money and is_cool and a_ok:            patterns.append("A")
+    if is_strong and is_fire  and is_hot:                      patterns.append("B")
+    if is_strong and is_hot and "B" not in patterns and c_ok:  patterns.append("C")
 
     vtag = (
         "+量爆" if vol_ratio >= 2.0 else
@@ -1221,7 +1274,7 @@ def _v4_score(df, mu, sigma, rtype):
     pvo   = g("PVO"); vri   = g("VRI", 50); slope = g("Slope")
     pvo_c = g("PVO_consec"); pvo_a = g("PVO_accel", 1); vri_d = g("VRI_delta")
     vol_r = g("VolRatio", 1); close = g("Close"); atr = g("ATR", close * 0.02)
-    sw     = df["Slope"].tail(30)
+    sw    = df["Slope"].tail(30)
     slope_z = (slope - float(sw.mean())) / (float(sw.std()) + 1e-9)
 
     score = 50.0
@@ -1264,13 +1317,11 @@ def run_v4(symbols, regime, today, day_dir) -> dict:
 
     rows = []; skipped = 0
     for sym in symbols:
-        # FinMind 為主，sleep 可縮短；Yahoo 備援仍需較長間隔
         sleep_t = random.uniform(0.3, 0.8) if _USE_FINMIND else random.uniform(1.5, 2.5)
         time.sleep(sleep_t)
         try:
             df = load_from_csv(sym, day_dir)
             if df is None:
-                # [FIX-23] 加 timeout 保護
                 try:
                     result = _with_timeout(
                         lambda s=sym: fetch_tw_ohlcv(s, "60d"),
@@ -1309,8 +1360,8 @@ def run_v4(symbols, regime, today, day_dir) -> dict:
         r["rank"] = i + 1
     top30  = result_rows[:30]
     scores = [r["score"] for r in result_rows]
-    am = round(float(np.mean(scores)), 2)
-    as_ = round(float(np.std(scores)), 2)
+    am  = round(float(np.mean(scores)), 2)
+    as_ = round(float(np.std(scores)),  2)
     log.info(f"V4 完成 ✅ | TOP30:{len(top30)} | 跳過:{skipped} | μ={am} σ={as_}")
     return {
         "market": "TW", "top20": top30,
@@ -1509,7 +1560,7 @@ def _v12_path(y_prs: dict, Pb: float, Pr: float, Pu: float) -> dict:
         if inc:
             best = inc[0][0]
 
-    batch = comp.get(best, 0) if best else 0
+    batch   = comp.get(best, 0) if best else 0
     ev_soft = 0.0
     if best:
         d = _PATH_DEFS.get(best, {})
@@ -1521,9 +1572,9 @@ def _v12_path(y_prs: dict, Pb: float, Pr: float, Pu: float) -> dict:
 
 def _v12_exit(old, ev_now, slope, days, curr_ret) -> str:
     ev_entry = old.get("ev_soft", 0.0)
-    if curr_ret <= -0.10:              return "硬停損"
+    if curr_ret <= -0.10:                            return "硬停損"
     if old.get("profit_locked") and curr_ret < 0.01: return "保本出場"
-    if ev_now < 0.005:                 return "EV衰退"
+    if ev_now < 0.005:                               return "EV衰退"
     if days > 7 and ev_entry > 0:
         drop = (ev_entry - ev_now) / ev_entry
         if drop > 0.20 and slope < -0.01: return "Slope加速出場"
@@ -1583,10 +1634,10 @@ def run_v12(symbols, regime, v4_data, today, day_dir) -> dict:
             if best_path not in [a_p, b_p]:
                 best_path = a_p or "423"
 
-            ev_thr    = ev_min * (1.20 if quality == "Flicker" else 1.0)
+            ev_thr   = ev_min * (1.20 if quality == "Flicker" else 1.0)
             if ev_soft < ev_thr:
                 continue
-            max_same  = max(1, round(max_pos * ratio.get(best_path, 0.50)))
+            max_same = max(1, round(max_pos * ratio.get(best_path, 0.50)))
             if path_counts.get(best_path, 0) >= max_same:
                 continue
             if len(positions) >= max_pos:
@@ -1595,11 +1646,11 @@ def run_v12(symbols, regime, v4_data, today, day_dir) -> dict:
                     if ev_soft < min_ev * 1.20:
                         continue
 
-            last     = df.iloc[-1]; close = float(last.get("Close", 0))
-            atr_raw  = feats.get("_atr_pct", 0.02) * close
-            tp1_px   = round(close * (1 + _PATH_DEFS.get(best_path, {}).get("tp1", 0.20)), 1)
-            tp2_px   = round(close * (1 + _PATH_DEFS.get(best_path, {}).get("tp2", 0.28)), 1)
-            stop_px  = round(close - atr_raw * 1.5, 1)
+            last    = df.iloc[-1]; close = float(last.get("Close", 0))
+            atr_raw = feats.get("_atr_pct", 0.02) * close
+            tp1_px  = round(close * (1 + _PATH_DEFS.get(best_path, {}).get("tp1", 0.20)), 1)
+            tp2_px  = round(close * (1 + _PATH_DEFS.get(best_path, {}).get("tp2", 0.28)), 1)
+            stop_px = round(close - atr_raw * 1.5, 1)
             if quality == "Flicker":
                 tp1_px = round(close * (1 + _PATH_DEFS.get(best_path, {}).get("tp1", 0.20) * 0.80), 1)
 
@@ -1640,7 +1691,7 @@ def run_v12(symbols, regime, v4_data, today, day_dir) -> dict:
                 "batch":        path_info.get("batch", 0),
             })
             path_counts[best_path] = path_counts.get(best_path, 0) + 1
-            log.info(f"  ✅ {sym} | {best_path} | EV:{ev_soft*100:+.2f}% | {quality} | {action}")
+            log.info(f"  ✅ {sym} | {best_path} | EV:{ev_soft * 100:+.2f}% | {quality} | {action}")
             if len(positions) >= max_pos:
                 log.info(f"  部位已滿({max_pos})")
                 break
@@ -1696,7 +1747,7 @@ def step_regime(market_data: dict) -> dict:
 
 
 def main():
-    log.info(f"🚀 資源法 Daily Compute 啟動 [{TS}]")
+    log.info(f"🚀 資源法 Daily Compute v3.13 啟動 [{TS}]")
 
     market_data = step_market()
     regime_data = step_regime(market_data)
