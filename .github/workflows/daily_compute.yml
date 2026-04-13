@@ -19,10 +19,16 @@ on:
     # ── 盤後：台灣時間 19:00 = UTC 12:00（日結存檔）
     - cron: "0 11 * * 1-5"
 
+# ✅ 防止多 workflow 同時寫入（關鍵1）
+concurrency:
+  group: stock-data
+  cancel-in-progress: false
+
 jobs:
   compute:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+
     env:
       TZ: Asia/Taipei
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -33,7 +39,11 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 1
+          fetch-depth: 0   # ✅ 必改（讓 rebase 可用）
+
+      # ✅ 關鍵2：先同步遠端（避免舊版本 push）
+      - name: 同步最新版本（避免衝突）
+        run: git pull --rebase origin main || echo "No remote changes"
 
       # ── 2. 設定 Python ──────────────────────────────────────
       - name: 安裝 Python 3.11
@@ -85,7 +95,7 @@ jobs:
           else:
               print("ℹ️ 無 suffix 快取，跳過")
 
-      # ── 6. 判斷執行模式並顯示資訊 ──────────────────────────
+      # ── 6. 判斷執行模式 ──────────────────────────
       - name: 判斷執行模式
         run: |
           TW_HOUR=$(TZ=Asia/Taipei date +"%H")
@@ -93,10 +103,10 @@ jobs:
           echo "台灣時間小時: ${TW_HOUR}"
           if [ "$TW_HOUR" -ge 9 ] && [ "$TW_HOUR" -le 14 ]; then
             echo "RUN_MODE=intraday" >> $GITHUB_ENV
-            echo "📈 執行模式: 盤中 (intraday) — watchlist + TOP20"
+            echo "📈 執行模式: 盤中"
           else
             echo "RUN_MODE=postmarket" >> $GITHUB_ENV
-            echo "📊 執行模式: 盤後 (postmarket) — 全部 ~150 檔"
+            echo "📊 執行模式: 盤後"
           fi
 
       # ── 7. 驗證 FinMind TOKEN ────────────────────────────────
@@ -108,94 +118,56 @@ jobs:
         run: |
           import requests, os
           token = os.environ.get('FINMIND_TOKEN', '')
-          if not token:
-              print("⚠️ FINMIND_TOKEN 未設定，將使用 Yahoo Finance 備援")
-          else:
-              print(f"✅ FINMIND_TOKEN 已設定 (長度:{len(token)})")
-              try:
-                  # 測試 Y9999 大盤資料
-                  resp = requests.get(
-                      'https://api.finmindtrade.com/api/v4/data',
-                      params={
-                          'dataset': 'TaiwanStockPrice',
-                          'data_id': 'Y9999',
-                          'start_date': '2025-01-01',
-                          'token': token
-                      }, timeout=15
-                  )
-                  data = resp.json()
-                  if data.get('status') == 200 and data.get('data'):
-                      print(f"✅ FinMind Y9999 (TAIEX) 連線正常，{len(data['data'])} 筆")
-                  else:
-                      print(f"❌ FinMind Y9999 異常: {data.get('msg','')}")
-              except Exception as e:
-                  print(f"⚠️ FinMind 測試失敗: {e}")
+          print("TOKEN OK" if token else "NO TOKEN")
 
-      # ── 8. 執行主計算 ───────────────────────────────────────
-      - name: 運行計算 (主要)
+      # ── 8. 主計算 ───────────────────────────────────────
+      - name: 運行計算
         id: compute_run
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           echo "🕐 台灣時間: $(TZ=Asia/Taipei date)"
-          echo "📋 執行模式: $RUN_MODE"
+          echo "📋 模式: $RUN_MODE"
           python daily_run.py
         continue-on-error: true
 
-      # ── 9. 自動重試（首次失敗時）────────────────────────────
-      - name: 重試計算（若首次失敗）
+      # ── 9. Retry ─────────────────────────────
+      - name: 重試
         if: steps.compute_run.outcome == 'failure'
-        env:
-          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          echo "⚠️ 首次失敗，等待 90s 後重試..."
           sleep 90
-          echo "🔄 重試: $(TZ=Asia/Taipei date)"
           python daily_run.py
 
-      # ── 10. 提交並推送更新 ──────────────────────────────────
-      - name: 提交並推送儲存更新
+      # ── 10. Commit ──────────────────────────────────
+      - name: 提交變更
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
           git add storage/ data/ stock_set.json
+
           if git diff --staged --quiet; then
-            echo "ℹ️ 無資料變更，跳過提交"
+            echo "無變更"
           else
-            MODE_LABEL="${RUN_MODE:-postmarket}"
-            TIMESTAMP=$(TZ=Asia/Taipei date +"%Y-%m-%d %H:%M")
-            git commit -m "🤖 [${MODE_LABEL}] 自動更新: ${TIMESTAMP} 台灣時間"
-            git push
-            echo "✅ 資料已推送至 GitHub"
+            git commit -m "🤖 自動更新: $(TZ=Asia/Taipei date '+%Y-%m-%d %H:%M')"
           fi
 
-      # ── 11. 盤後全量掃描通知 ────────────────────────────────
-      - name: 盤後完成摘要
-        if: env.RUN_MODE == 'postmarket'
-        run: |
-          echo "📊 盤後全量掃描完成"
-          if [ -f storage/v12/v12_latest.json ]; then
-            echo "✅ V12 快照已更新"
-            python -c "
-          import json
-          with open('storage/v12/v12_latest.json') as f:
-              d = json.load(f)
-          pos = d.get('positions', [])
-          print(f'  部位數: {len(pos)}')
-          for p in pos[:5]:
-              print(f\"  {p['symbol']} | {p['path']} | EV:{p['ev']:+.2f}% | {p['action']}\")
-          "
-          fi
+      # ✅ 關鍵3：push 前再同步（避免中途衝突）
+      - name: 再次同步（防衝突）
+        run: git pull --rebase origin main || echo "No changes"
 
-      # ── 12. 失敗通知 ──────────────────────────────────────────
-      - name: 失敗通知
-        if: failure()
+      # ✅ 關鍵4：push 加 retry（最終保險）
+      - name: 推送（帶重試）
         run: |
-          echo "❌ 計算流程失敗"
-          echo "常見原因："
-          echo "  1. Yahoo Finance 429 Rate Limit"
-          echo "  2. FinMind TOKEN 過期或額度耗盡"
-          echo "  3. 個股代碼已下市"
-          echo "  4. 網路逾時"
+          for i in 1 2 3
+          do
+            git push && break
+            echo "⚠️ push 失敗，重試 $i"
+            sleep 10
+            git pull --rebase origin main
+          done
+
+      # ── 11. 完成 ─────────────────────────────
+      - name: 完成
+        run: echo "✅ 完成 $(TZ=Asia/Taipei date)"
