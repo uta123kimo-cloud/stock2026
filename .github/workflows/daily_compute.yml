@@ -96,34 +96,46 @@ jobs:
               print("ℹ️ 無 suffix 快取檔，跳過清理")
       # ── 6. [FIX-B] 驗證 FinMind TOKEN 可用性 ──────────────
       # 確保 TOKEN 存在且 API 可連線，若失敗不中止（降級 Yahoo）
-      - name: 驗證 FinMind TOKEN
+      - name: 驗證 FinMind TOKEN 可用性
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        continue-on-error: true  # 確保驗證失敗時不會中斷整個運算流程
+        shell: python
         run: |
-          if [ -z "$FINMIND_TOKEN" ]; then
-            echo "⚠️ FINMIND_TOKEN 未設定，將使用 Yahoo Finance 備援"
-          else
-            echo "✅ FINMIND_TOKEN 已設定（長度: ${#FINMIND_TOKEN}）"
-            # 快速測試 API 可連性（不失敗整個 job）
-            python3 -c "
-import requests, os, sys
-token = os.environ['FINMIND_TOKEN']
-try:
-    r = requests.get(
-        'https://api.finmindtrade.com/api/v4/data',
-        params={'dataset': 'TaiwanStockPrice', 'data_id': '2330',
-                'start_date': '2024-01-01', 'token': token},
-        timeout=15
-    )
-    d = r.json()
-    if d.get('status') == 200 and d.get('data'):
-        print(f'✅ FinMind API 連線正常（2330 取得 {len(d[\"data\"])} 筆）')
-    else:
-        print(f'⚠️ FinMind API 回應異常: status={d.get(\"status\")} msg={d.get(\"msg\",\"\")}')
-except Exception as e:
-    print(f'⚠️ FinMind API 連線失敗: {e}（將使用 Yahoo 備援）')
-" || true
-          fi
+          import requests
+          import os
+          import sys
+
+          token = os.environ.get('FINMIND_TOKEN')
+
+          if not token:
+              print("⚠️ FINMIND_TOKEN 未設定，系統將降級使用 Yahoo Finance 備援。")
+          else:
+              print(f"✅ FINMIND_TOKEN 已設定（長度: {len(token)}）")
+              
+              # 執行 API 連通性測試
+              try:
+                  url = 'https://api.finmindtrade.com/api/v4/data'
+                  params = {
+                      'dataset': 'TaiwanStockPrice',
+                      'data_id': '2330',
+                      'start_date': '2024-01-01',
+                      'token': token
+                  }
+                  
+                  response = requests.get(url, params=params, timeout=15)
+                  data = response.json()
+                  
+                  if data.get('status') == 200 and data.get('data'):
+                      record_count = len(data['data'])
+                      print(f"✅ FinMind API 連線正常（成功取得台積電 2330 共 {record_count} 筆資料）")
+                  else:
+                      msg = data.get('msg', '未知錯誤')
+                      print(f"❌ FinMind API 回傳異常: {msg}，將切換至 Yahoo Finance")
+                      
+              except Exception as e:
+                  print(f"⚠️ API 請求發生錯誤: {str(e)}")
+                  print("🛠️ 網路連線異常，系統將自動採取降級方案。")
 
       # ── 7. 執行主計算流程 ──────────────────────────────────
       # [FIX-C] continue-on-error + retry：Yahoo 429 後給 90s 讓 rate limit 解除
