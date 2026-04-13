@@ -21,6 +21,6 @@
     }
   ],
   "data_source": "FinMind_Y9999_TAIEX",
-  "run_mode": "intraday",
-  "generated_at": "2026-04-13 14:34"
+  "run_mode": "postmarket",
+  "generated_at": "2026-04-13 15:23"
 }
