@@ -6,11 +6,11 @@
   "active_strategy": "bull",
   "active_path": "45",
   "backup_path": "423",
-  "slope_5d": 0.0652,
-  "slope_20d": 0.0038,
-  "mkt_rsi": 62.82,
-  "adx": 22.75,
-  "index_close": 35457.29,
+  "slope_5d": 0.0832,
+  "slope_20d": 0.0063,
+  "mkt_rsi": 66.61,
+  "adx": 22.58,
+  "index_close": 36296.12,
   "history": [
     {
       "month": "2026-04",
@@ -21,6 +21,6 @@
     }
   ],
   "data_source": "FinMind_Y9999_TAIEX",
-  "run_mode": "postmarket",
-  "generated_at": "2026-04-13 20:00"
+  "run_mode": "intraday",
+  "generated_at": "2026-04-14 14:33"
 }
