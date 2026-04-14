@@ -1,6 +1,6 @@
 name: 資源法每日計算 v4.0
 
-# ── 1. 觸發條件 (整合手動與定時) ───────────────────────────
+# ── 1. 觸發條件 ──────────────────────────────────────────────
 on:
   workflow_dispatch:
     inputs:
@@ -18,49 +18,51 @@ on:
     # ── 盤後：台灣時間 18:00 = UTC 10:00
     - cron: "0 10 * * 1-5"
 
-# ── 2. 環境變數 (維持原變數不變) ──────────────────────────
+# ── 2. 環境變數 ──────────────────────────────────────────────
 env:
   FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   GITHUB_OWNER: ${{ github.repository_owner }}
   GITHUB_REPO: ${{ github.event.repository.name }}
+  # [FIX-TZ] TZ 環境變數讓 Python 的 datetime 生效，
+  #           但 shell date 指令需用 TZ=Asia/Taipei date 才有效
   TZ: Asia/Taipei
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
-# ── 3. 防止多個工作流衝突 ──────────────────────────────────
+# ── 3. 防止多個工作流衝突 ────────────────────────────────────
 concurrency:
   group: stock-data
   cancel-in-progress: false
 
-# ── 4. 計算任務 ────────────────────────────────────────────
+# ── 4. 計算任務 ──────────────────────────────────────────────
 jobs:
   compute:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
     steps:
-      # ── 1. 檢出儲存庫 ──
+      # ── Step 1: 檢出儲存庫 ─────────────────────────────────
       - name: 檢出儲存庫
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      # ── 2. 同步最新版本 ──
+      # ── Step 2: 同步最新版本 ────────────────────────────────
       - name: 同步最新版本
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main || echo "No remote changes"
 
-      # ── 3. 設定 Python ──
+      # ── Step 3: 設定 Python ─────────────────────────────────
       - name: 安裝 Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
 
-      # ── 4. 安裝依賴 ──
+      # ── Step 4: 安裝依賴 ────────────────────────────────────
       - name: 安裝依賴項
         run: |
           pip install --upgrade pip
@@ -73,13 +75,13 @@ jobs:
             "requests==2.32.3" \
             "finmind"
 
-      # ── 5. 準備儲存目錄 ──
+      # ── Step 5: 準備儲存目錄 ────────────────────────────────
       - name: 準備儲存目錄
         run: |
           mkdir -p storage/{v4,v12,regime,market,logs,cache}
           mkdir -p data
 
-      # ── 6. 清除快取 ──
+      # ── Step 6: 清除過期 suffix 快取 ────────────────────────
       - name: 清除過期 suffix 快取
         shell: python
         run: |
@@ -91,72 +93,150 @@ jobs:
                   except: cache = {}
               if cache:
                   cleaned = {k: v for k, v in cache.items() if v is not None}
+                  removed = len(cache) - len(cleaned)
                   with open(file_path, 'w', encoding='utf-8') as f:
                       json.dump(cleaned, f, indent=2, ensure_ascii=False)
+                  print(f"✅ 清除 {removed} 筆 null suffix 快取")
 
-      # ── 7. 判斷執行模式 ──
+      # ── Step 7: [FIX-TZ] 判斷執行模式 ──────────────────────
+      # 關鍵修正：shell date 必須明確指定 TZ=Asia/Taipei
+      # 否則 GitHub Actions runner 使用 UTC，導致模式判斷永遠錯誤
       - name: 判斷執行模式
         run: |
-          TW_HOUR=$(date +"%H")
-          echo "台灣時間小時: ${TW_HOUR}"
-          if [ "$TW_HOUR" -ge 9 ] && [ "$TW_HOUR" -le 14 ]; then
+          # [FIX] 明確帶 TZ= 前綴，確保取得台灣時間
+          TW_HOUR=$(TZ=Asia/Taipei date +"%H")
+          TW_TIME=$(TZ=Asia/Taipei date '+%Y-%m-%d %H:%M:%S')
+          echo "🕐 台灣時間: ${TW_TIME}"
+          echo "🕐 台灣時間小時: ${TW_HOUR}"
+
+          # 允許手動指定模式
+          MANUAL_MODE="${{ github.event.inputs.run_mode }}"
+          if [ "$MANUAL_MODE" = "intraday" ] || [ "$MANUAL_MODE" = "postmarket" ]; then
+            echo "RUN_MODE=${MANUAL_MODE}" >> $GITHUB_ENV
+            echo "📋 手動指定執行模式: ${MANUAL_MODE}"
+          elif [ "$TW_HOUR" -ge 9 ] && [ "$TW_HOUR" -le 14 ]; then
             echo "RUN_MODE=intraday" >> $GITHUB_ENV
+            echo "📈 自動判斷: 盤中 (intraday) — 台灣時間 ${TW_HOUR}:xx"
           else
             echo "RUN_MODE=postmarket" >> $GITHUB_ENV
+            echo "📊 自動判斷: 盤後 (postmarket) — 台灣時間 ${TW_HOUR}:xx"
           fi
 
-      # ── 8. 驗證 Token ──
+      # ── Step 8: 驗證 FinMind TOKEN ──────────────────────────
       - name: 驗證 FinMind TOKEN
+        continue-on-error: true
+        shell: python
         run: |
-          python -c "import os; print('TOKEN OK' if os.environ.get('FINMIND_TOKEN') else 'NO TOKEN')"
+          import requests, os
+          token = os.environ.get('FINMIND_TOKEN', '')
+          if not token:
+              print("⚠️ FINMIND_TOKEN 未設定，將使用 Yahoo Finance 備援")
+          else:
+              print(f"✅ FINMIND_TOKEN 已設定 (長度:{len(token)})")
+              try:
+                  resp = requests.get(
+                      'https://api.finmindtrade.com/api/v4/data',
+                      params={
+                          'dataset': 'TaiwanStockPrice',
+                          'data_id': 'Y9999',
+                          'start_date': '2025-01-01',
+                          'token': token
+                      }, timeout=15
+                  )
+                  data = resp.json()
+                  if data.get('status') == 200 and data.get('data'):
+                      print(f"✅ FinMind Y9999 (TAIEX) 連線正常，{len(data['data'])} 筆")
+                  else:
+                      print(f"❌ FinMind Y9999 異常: {data.get('msg','')}")
+              except Exception as e:
+                  print(f"⚠️ FinMind 測試失敗: {e}")
 
-      # ── 9. 運行計算 ──
-      - name: 運行計算
+      # ── Step 9: 運行主計算 ──────────────────────────────────
+      - name: 運行計算 (主要)
         id: compute_run
-        run: python jobs/daily_run.py
+        run: |
+          echo "🕐 台灣時間: $(TZ=Asia/Taipei date)"
+          echo "📋 執行模式: $RUN_MODE"
+          python jobs/daily_run.py
         continue-on-error: true
 
-      - name: 重試主計算
+      # ── Step 10: 重試（首次失敗時）─────────────────────────
+      - name: 重試主計算 (若首次失敗)
         if: steps.compute_run.outcome == 'failure'
         run: |
+          echo "⚠️ 首次失敗，等待 90s 後重試..."
           sleep 90
+          echo "🔄 重試: $(TZ=Asia/Taipei date)"
           python jobs/daily_run.py
 
-      # ── 10. 運行部位管理 ──
+      # ── Step 11: 運行 portfolio_manager ─────────────────────
       - name: 運行 portfolio_manager.py
+        continue-on-error: true
         run: |
           if [ -f engine/portfolio_manager.py ]; then
+            echo "▶️ 執行 portfolio_manager.py"
             python engine/portfolio_manager.py
           else
-            echo "Skipping portfolio_manager.py (File not found)"
+            echo "ℹ️ engine/portfolio_manager.py 不存在，跳過"
           fi
 
-      # ── 11. 提交與推送（修正：先 stash 再 pull，避免 unstaged 衝突）──
-      - name: 提交變更
+      # ── Step 12: 提交並推送（帶 stash + rebase 防衝突）──────
+      - name: 提交並推送更新
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add storage/ data/ stock_set.json holdings.json streamlit_display.json 2>/dev/null || true
+          # 暫存可能未追蹤的異動
+          git add storage/ data/ stock_set.json positions.json 2>/dev/null || true
 
           if git diff --staged --quiet; then
-            echo "無變更，跳過 commit"
-          else
-            git commit -m "📊 Auto: $(date '+%Y-%m-%d %H:%M') UTC"
+            echo "ℹ️ 無資料變更，跳過 commit"
+            exit 0
           fi
 
-      - name: 推送變更 (帶重試機制)
-        run: |
-          for i in 1 2 3
-          do
-            echo "=== 推送嘗試 $i ==="
-            # stash 未追蹤的暫存變更，以免 rebase 失敗
-            git stash --include-untracked || true
-            git pull --rebase origin main || true
-            git stash pop || true
+          MODE_LABEL="${RUN_MODE:-postmarket}"
+          TIMESTAMP=$(TZ=Asia/Taipei date '+%Y-%m-%d %H:%M')
+          git commit -m "🤖 [${MODE_LABEL}] 自動更新: ${TIMESTAMP} 台灣時間"
+          echo "✅ commit 完成"
 
-            git push && break || {
-              echo "推送失敗，等待 10 秒後重試..."
-              sleep 10
+          # 帶重試的 push（先 stash → pull rebase → stash pop → push）
+          for i in 1 2 3; do
+            echo "=== 推送嘗試 $i/3 ==="
+            git stash --include-untracked 2>/dev/null || true
+            git pull --rebase origin main 2>/dev/null || true
+            git stash pop 2>/dev/null || true
+            git push && { echo "✅ 推送成功"; break; } || {
+              echo "⚠️ 推送失敗，等待 15s..."
+              sleep 15
             }
           done
+
+      # ── Step 13: 盤後全量掃描摘要 ────────────────────────────
+      - name: 盤後完成摘要
+        if: env.RUN_MODE == 'postmarket'
+        run: |
+          echo "📊 盤後全量掃描完成 ($(TZ=Asia/Taipei date))"
+          if [ -f storage/v12/v12_latest.json ]; then
+            echo "✅ V12 快照已更新"
+            python -c "
+          import json
+          with open('storage/v12/v12_latest.json') as f:
+              d = json.load(f)
+          pos = d.get('positions', [])
+          print(f'  部位數: {len(pos)}')
+          for p in pos[:5]:
+              print(f\"  {p['symbol']} | {p['path']} | EV:{p['ev']:+.2f}% | {p['action']}\")
+          "
+          fi
+
+      # ── Step 14: 失敗通知 ──────────────────────────────────
+      - name: 失敗通知
+        if: failure()
+        run: |
+          echo "❌ 計算流程失敗 ($(TZ=Asia/Taipei date))"
+          echo "常見原因："
+          echo "  1. Yahoo Finance 429 Rate Limit"
+          echo "  2. FinMind TOKEN 過期或額度耗盡"
+          echo "  3. 個股代碼已下市"
+          echo "  4. 網路逾時"
+          echo "  5. RUN_MODE 判斷錯誤（TZ未生效）"
