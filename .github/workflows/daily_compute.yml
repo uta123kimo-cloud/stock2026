@@ -152,7 +152,7 @@ jobs:
         run: |
           echo "🕐 台灣時間: $(TZ=Asia/Taipei date)"
           echo "📋 執行模式: $RUN_MODE"
-          python jobs/daily_run.py
+          python main/daily_run.py
         continue-on-error: true
 
       # ── Step 10: 重試（首次失敗時）─────────────────────────
@@ -162,7 +162,7 @@ jobs:
           echo "⚠️ 首次失敗，等待 90s 後重試..."
           sleep 90
           echo "🔄 重試: $(TZ=Asia/Taipei date)"
-          python jobs/daily_run.py
+          python main/daily_run.py
 
       # ── Step 11: 運行 portfolio_manager ─────────────────────
       - name: 運行 portfolio_manager.py
