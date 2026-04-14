@@ -187,39 +187,36 @@ jobs:
             echo "ℹ️ 找不到 portfolio_manager.py，跳過"
           fi
 
-      # ── Step 12: 提交並推送 (徹底解決 Exit Code 128) ─────────
+     # ── Step 12: 提交並推送 (徹底修復資料不更新問題) ─────────
       - name: 提交並推送更新
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # 1. 強制將所有變動（包含未追蹤的新檔案）加入暫存
-          git add -A
+          # 1. 確保所有產出的 json 與資料都進入暫存區
+          git add storage/ data/ *.json 2>/dev/null || true
 
-          # 2. 檢查是否有東西可以 commit
+          # 2. 如果沒有變動就跳過
           if git diff --staged --quiet; then
-            echo "ℹ️ 無資料變更，跳過 commit"
+            echo "ℹ️ 資料無變動，無需更新"
             exit 0
           fi
 
-          # 3. 先進行 Commit，保持工作區乾淨
-          MODE_LABEL="${RUN_MODE:-postmarket}"
+          # 3. 先 Commit 鎖定本地變動，讓工作區變乾淨
           TIMESTAMP=$(TZ=Asia/Taipei date '+%Y-%m-%d %H:%M')
-          git commit -m "🤖 [${MODE_LABEL}] 自動更新: ${TIMESTAMP} 台灣時間"
-          echo "✅ 本地 Commit 完成"
+          git commit -m "🤖 自動更新交易資料: ${TIMESTAMP}"
 
-          # 4. 乾淨的工作區執行 pull --rebase 就不會報 128 錯誤了
+          # 4. 使用強勢重試與 Rebase
           for i in 1 2 3; do
-            echo "=== 推送嘗試 $i/3 ==="
-            if git pull --rebase origin main && git push; then
-              echo "✅ 推送成功"
+            echo "=== 嘗試同步至遠端 $i/3 ==="
+            # 先拉取遠端變動，若有衝突以本地剛 Commit 的資料為主
+            if git pull --rebase -X theirs origin main && git push origin main; then
+              echo "✅ 資料已成功推送到儲存庫，網頁應會同步更新"
               exit 0
             fi
-            echo "⚠️ 推送失敗，等待 15s 重試..."
-            sleep 15
+            sleep 10
           done
-          
-          echo "❌ 推送嘗試多次後失敗"
+          echo "❌ 多次推送失敗，請檢查權限"
           exit 1
 
       # ── Step 13: 盤後全量掃描摘要 ────────────────────────────
