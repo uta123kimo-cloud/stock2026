@@ -8,15 +8,15 @@ on:
         description: '執行模式 (auto/intraday/postmarket)'
         required: false
         default: 'auto'
-  #schedule:
+  schedule:
     # ── 盤中：台灣時間 09:32 = UTC 01:32
-    #- cron: "32 1 * * 1-5"
+    - cron: "32 1 * * 1-5"
     # ── 盤中：台灣時間 10:31 = UTC 02:31
-    #- cron: "31 2 * * 1-5"
+    - cron: "31 2 * * 1-5"
     # ── 盤中：台灣時間 11:28 = UTC 03:28
-    #- cron: "28 3 * * 1-5"
+    - cron: "28 3 * * 1-5"
     # ── 盤後：台灣時間 18:00 = UTC 10:00
-    #- cron: "0 10 * * 1-5"
+    - cron: "0 10 * * 1-5"
 
 # ── 2. 環境變數 ──────────────────────────────────────────────
 env:
@@ -51,7 +51,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # 使用 autostash 確保若工作區有變動也能直接 pull
           git pull --rebase --autostash origin main || echo "No remote changes"
 
       # ── Step 3: 設定 Python ─────────────────────────────────
@@ -146,13 +145,18 @@ jobs:
               except Exception as e:
                   print(f"⚠️ FinMind 測試失敗: {e}")
 
-      # ── Step 9: 運行主計算 ──────────────────────────────────
+      # ── Step 9: 運行主計算 (路徑已修正) ───────────────────────
       - name: 運行計算 (主要)
         id: compute_run
         run: |
           echo "🕐 台灣時間: $(TZ=Asia/Taipei date)"
           echo "📋 執行模式: $RUN_MODE"
-          python main/daily_run.py
+          if [ -f "main/daily_run.py" ]; then
+            python main/daily_run.py
+          else
+            echo "❌ 找不到 main/daily_run.py"
+            exit 1
+          fi
         continue-on-error: true
 
       # ── Step 10: 重試（首次失敗時）─────────────────────────
@@ -168,11 +172,14 @@ jobs:
       - name: 運行 portfolio_manager.py
         continue-on-error: true
         run: |
-          if [ -f engine/portfolio_manager.py ]; then
-            echo "▶️ 執行 portfolio_manager.py"
+          if [ -f main/portfolio_manager.py ]; then
+            echo "▶️ 執行 main/portfolio_manager.py"
+            python main/portfolio_manager.py
+          elif [ -f engine/portfolio_manager.py ]; then
+            echo "▶️ 執行 engine/portfolio_manager.py"
             python engine/portfolio_manager.py
           else
-            echo "ℹ️ engine/portfolio_manager.py 不存在，跳過"
+            echo "ℹ️ 找不到 portfolio_manager.py，跳過"
           fi
 
       # ── Step 12: 提交並推送（使用 --autostash 簡化邏輯）──────
@@ -181,10 +188,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # 階段一：把變動加入暫存區
           git add storage/ data/ stock_set.json positions.json 2>/dev/null || true
 
-          # 檢查是否有變動需要提交
           if git diff --staged --quiet; then
             echo "ℹ️ 無資料變更，跳過 commit"
             exit 0
@@ -193,22 +198,16 @@ jobs:
           MODE_LABEL="${RUN_MODE:-postmarket}"
           TIMESTAMP=$(TZ=Asia/Taipei date '+%Y-%m-%d %H:%M')
           git commit -m "🤖 [${MODE_LABEL}] 自動更新: ${TIMESTAMP} 台灣時間"
-          echo "✅ commit 完成"
 
-          # 階段二：帶重試與 autostash 的推送
-          # --autostash 會處理 commit 後又產生的任何未存檔變動
           for i in 1 2 3; do
             echo "=== 推送嘗試 $i/3 ==="
-            if git pull --rebase --autostash origin main; then
-              if git push; then
-                echo "✅ 推送成功"
-                exit 0
-              fi
+            if git pull --rebase --autostash origin main && git push; then
+              echo "✅ 推送成功"
+              exit 0
             fi
-            echo "⚠️ 推送或合併失敗，等待 15s 後重試..."
+            echo "⚠️ 推送失敗，等待 15s 重試..."
             sleep 15
           done
-          echo "❌ 推送嘗試多次後失敗"
           exit 1
 
       # ── Step 13: 盤後全量掃描摘要 ────────────────────────────
@@ -224,8 +223,6 @@ jobs:
               d = json.load(f)
           pos = d.get('positions', [])
           print(f'  部位數: {len(pos)}')
-          for p in pos[:5]:
-              print(f\"  {p['symbol']} | {p['path']} | EV:{p['ev']:+.2f}% | {p['action']}\")
           "
           fi
 
@@ -234,4 +231,3 @@ jobs:
         if: failure()
         run: |
           echo "❌ 計算流程失敗 ($(TZ=Asia/Taipei date))"
-          echo "請檢查 Action Logs 獲取詳細資訊。"
