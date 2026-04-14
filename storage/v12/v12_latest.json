@@ -6,10 +6,10 @@
       "path": "45",
       "ev": 4.48,
       "ev_tier": "🔥主力",
-      "action": "進場",
+      "action": "持有",
       "exit_signal": "—",
       "quality": "Pure",
-      "days_held": 0,
+      "days_held": 1,
       "curr_ret_pct": 0.0,
       "entry_price": 2670.0,
       "close": 2670.0,
@@ -21,7 +21,7 @@
       "is_watchlist": false
     },
     {
-      "symbol": "2327",
+      "symbol": "3406",
       "path": "45",
       "ev": 4.48,
       "ev_tier": "🔥主力",
@@ -30,17 +30,17 @@
       "quality": "Pure",
       "days_held": 0,
       "curr_ret_pct": 0.0,
-      "entry_price": 312.0,
-      "close": 312.0,
-      "tp1_price": 374.4,
-      "tp2_price": 399.4,
-      "stop_price": 290.5,
+      "entry_price": 518.0,
+      "close": 518.0,
+      "tp1_price": 621.6,
+      "tp2_price": 663.0,
+      "stop_price": 491.7,
       "regime": "bull",
       "batch": 2,
       "is_watchlist": false
     },
     {
-      "symbol": "2382",
+      "symbol": "3229",
       "path": "45",
       "ev": 4.48,
       "ev_tier": "🔥主力",
@@ -49,14 +49,14 @@
       "quality": "Pure",
       "days_held": 0,
       "curr_ret_pct": 0.0,
-      "entry_price": 323.0,
-      "close": 323.0,
-      "tp1_price": 387.6,
-      "tp2_price": 413.4,
-      "stop_price": 308.6,
+      "entry_price": 24.5,
+      "close": 24.5,
+      "tp1_price": 29.4,
+      "tp2_price": 31.4,
+      "stop_price": 22.2,
       "regime": "bull",
-      "batch": 1,
-      "is_watchlist": true
+      "batch": 2,
+      "is_watchlist": false
     }
   ],
   "stats": {
@@ -75,6 +75,6 @@
   "path_counts": {
     "45": 3
   },
-  "run_mode": "intraday",
-  "generated_at": "2026-04-14 14:33"
+  "run_mode": "postmarket",
+  "generated_at": "2026-04-14 19:08"
 }
