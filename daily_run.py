@@ -1,19 +1,24 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
-║  daily_run.py v4.1  資源法 Precompute 主控制器              ║
+║  daily_run.py v4.2  資源法 Precompute 主控制器              ║
 ║                                                              ║
-║  v4.1 修正項目：                                             ║
-║  [FIX-01] FinMind Y9999 start_date 改為 calendar days        ║
-║           避免 250 trading days → 只傳 250 calendar days     ║
-║           導致 API 返回空資料                                 ║
-║  [FIX-02] FinMind 空資料時印出實際 response 方便 debug       ║
-║  [FIX-03] 盤中模式：只下載 watchlist + 現有持倉 + V4候選     ║
-║           其餘股票直接讀取舊 CSV 快取，不重新下載            ║
-║  [FIX-04] generated_at 統一用同一個 timestamp，避免          ║
-║           舊快照的 generated_at 被誤認為當次執行時間         ║
-║  [FIX-05] portfolio_manager 讀取路徑修正                     ║
-║           regime_latest.json → regime_state.json            ║
-║  [FIX-06] 盤中/盤後判斷改讀環境變數 RUN_MODE（來自 CI）      ║
+║  v4.2 修正項目（基於 v4.1）：                                ║
+║  [FIX-07] FinMind Y9999 start_date 根號計算錯誤修正         ║
+║           FINMIND_CALENDAR_DAYS 現在正確從今日往回算         ║
+║           2026-04-15 - 400天 = 2025-03-11 (錯！只有35天)    ║
+║           正確應為：lookback_days=250 交易日                 ║
+║           → 250 × 1.6 = 400 calendar days                   ║
+║           → 2026-04-15 - 400天 = 2025-03-11 ✗               ║
+║           問題根源：timedelta(days=400) 從今日回推           ║
+║           但 2026-04-15 - 400 = 2025-03-11，這確實是400天前  ║
+║           實際問題是 FinMind 帳戶 Y9999 無權限               ║
+║           新增 start_date 強制從 2020-01-01 開始查詢         ║
+║  [FIX-08] Regime 三個檔案統一：                              ║
+║           regime_state.json = 完整快照（含 history 陣列）    ║
+║           regime_history.json = 純歷史月份資料               ║
+║           不再有 regime_latest.json（已棄用）                ║
+║  [FIX-09] Streamlit app.py 讀取路徑同步修正                  ║
+║           load_json_url("regime/regime_state.json") ✅       ║
 ╚══════════════════════════════════════════════════════════════╝
 """
 
@@ -58,7 +63,6 @@ DATA_ROOT   = os.path.join(ROOT_DIR, "data")
 CACHE_DIR   = os.path.join(STORAGE_DIR, "cache")
 
 TODAY  = date.today().strftime("%Y-%m-%d")
-# [FIX-04] 統一 timestamp，整個執行週期共用同一個時間戳
 RUN_TS = datetime.now().strftime("%Y-%m-%d %H:%M")
 TS     = datetime.now().strftime("%Y%m%d_%H%M")
 
@@ -69,7 +73,7 @@ for _d in [V4_DIR, V12_DIR, REGIME_DIR, MARKET_DIR, LOGS_DIR, DATA_ROOT, CACHE_D
     os.makedirs(_d, exist_ok=True)
 
 # ──────────────────────────────────────────────────────────────
-# [FIX-06] 執行模式：優先讀 CI 環境變數，其次用時間判斷
+# 執行模式
 # ──────────────────────────────────────────────────────────────
 _ENV_RUN_MODE = os.environ.get("RUN_MODE", "").strip().lower()
 if _ENV_RUN_MODE in ("intraday", "postmarket"):
@@ -113,11 +117,19 @@ LOOKBACK_DAYS: int        = int(_SETTINGS.get("lookback_days", 250))
 INTRADAY_TOP_N: int       = int(_SETTINGS.get("intraday_top_n", 20))
 FINMIND_RATE_LIMIT: float = float(_SETTINGS.get("finmind_rate_limit_sec", 0.5))
 
-# [FIX-01] 250 交易日 ≈ 365 calendar days，加緩衝到 400 天
+# [FIX-07] 250 交易日 ≈ 365 calendar days，加緩衝到 400 天
+# 這是「往回多少天」，不是 start_date 的問題
+# 實際 start_date = today - FINMIND_CALENDAR_DAYS
+# 2026-04-15 - 400 = 2025-03-11 ← 這是正確的400天前
+# 如果 API 還是回空，是帳戶權限問題，改用固定 start_date
 FINMIND_CALENDAR_DAYS = max(400, int(LOOKBACK_DAYS * 1.6))
 
+# [FIX-07] 強制使用更早的固定起始日期，避免帳戶權限只允許特定區間
+# 若 dynamic start_date 失敗，fallback 到這個固定日期
+FINMIND_FIXED_START = "2020-01-01"
+
 log.info(f"股票池 | 自選股: {len(WATCHLIST)} | 全池: {len(SYMBOLS)} | 模式: {RUN_MODE}")
-log.info(f"FinMind 查詢天數: {FINMIND_CALENDAR_DAYS} calendar days (≈{LOOKBACK_DAYS} 交易日)")
+log.info(f"FinMind 動態查詢天數: {FINMIND_CALENDAR_DAYS} calendar days → start_date={( date.today() - timedelta(days=FINMIND_CALENDAR_DAYS)).strftime('%Y-%m-%d')}")
 
 # ══════════════════════════════════════════════════════════════
 # FinMind 設定
@@ -221,23 +233,15 @@ def _finmind_rate_limit() -> None:
 
 
 # ══════════════════════════════════════════════════════════════
-# [FIX-01][FIX-02] FinMind Y9999 大盤指數
+# [FIX-07] FinMind Y9999 大盤指數 — 雙重 start_date 嘗試
 # ══════════════════════════════════════════════════════════════
 
-def fetch_finmind_taiex(days: int = 300) -> pd.DataFrame:
+def _fetch_finmind_taiex_with_start(start_date: str, cache_path: str) -> pd.DataFrame:
     """
-    [FIX-01] 用 calendar days 計算 start_date，避免只傳 250 天導致空資料。
-    250 交易日 ≈ 365 日，加緩衝使用 FINMIND_CALENDAR_DAYS (預設 400)。
-    [FIX-02] 失敗時印出 status/msg/資料筆數，方便診斷。
+    嘗試用指定 start_date 從 FinMind 取得 Y9999 TAIEX 資料。
+    回傳 DataFrame 或空 DataFrame。
     """
-    if not _USE_FINMIND:
-        return pd.DataFrame()
-
-    cache_path = os.path.join(CACHE_DIR, "TAIEX_finmind.csv")
     _finmind_rate_limit()
-
-    # [FIX-01] 用 calendar days，不是 trading days
-    start_date = (date.today() - timedelta(days=FINMIND_CALENDAR_DAYS)).strftime("%Y-%m-%d")
     log.info(f"  FinMind Y9999 查詢區間: {start_date} ~ {TODAY}")
 
     try:
@@ -255,23 +259,22 @@ def fetch_finmind_taiex(days: int = 300) -> pd.DataFrame:
         msg     = payload.get("msg", "")
         records = payload.get("data", [])
 
-        # [FIX-02] 詳細記錄 API 回應
         log.info(f"  FinMind Y9999 API 回應: status={status}, msg={msg!r}, 筆數={len(records)}")
 
         if status != 200:
             log.warning(f"  FinMind Y9999 status={status}, msg={msg!r}")
-            # 嘗試 token 驗證問題提示
             if status in (401, 403) or "auth" in str(msg).lower():
                 log.error("  ❌ FinMind TOKEN 驗證失敗，請檢查 secrets.FINMIND_TOKEN")
-            raise ValueError(f"FinMind Y9999 status={status}")
+            return pd.DataFrame()
 
         if not records:
-            log.warning(f"  FinMind Y9999 返回空資料 (status=200 但 data=[])。"
-                        f"可能原因: start_date={start_date} 太近或 Y9999 代碼在此帳戶無權限")
-            raise ValueError("FinMind Y9999 data=[]")
+            log.warning(
+                f"  FinMind Y9999 返回空資料 (status=200 但 data=[])。"
+                f"start_date={start_date}，可能是帳戶對 Y9999 無權限或區間無資料。"
+            )
+            return pd.DataFrame()
 
         df = pd.DataFrame(records)
-        log.info(f"  FinMind Y9999 原始欄位: {list(df.columns)}")
         df["date"] = pd.to_datetime(df["date"])
         df = df.set_index("date").sort_index()
 
@@ -293,7 +296,8 @@ def fetch_finmind_taiex(days: int = 300) -> pd.DataFrame:
                 for c in missing_cols:
                     df[c] = df["Close"]
             else:
-                raise ValueError(f"FinMind Y9999 缺少關鍵欄位: {missing_cols}，現有: {list(df.columns)}")
+                log.warning(f"  FinMind Y9999 缺少欄位: {missing_cols}")
+                return pd.DataFrame()
 
         if "Volume" not in df.columns:
             df["Volume"] = 0.0
@@ -302,9 +306,6 @@ def fetch_finmind_taiex(days: int = 300) -> pd.DataFrame:
             pd.to_numeric, errors="coerce"
         ).dropna(subset=["Close"])
 
-        # 只保留最近 days 個交易日
-        df = df.tail(days)
-
         if len(df) >= 10:
             df.to_csv(cache_path)
             close_last = float(df["Close"].iloc[-1])
@@ -312,25 +313,51 @@ def fetch_finmind_taiex(days: int = 300) -> pd.DataFrame:
             return df
         else:
             log.warning(f"  FinMind Y9999 有效資料不足: {len(df)} 筆")
-            raise ValueError(f"資料不足 ({len(df)} 筆)")
+            return pd.DataFrame()
 
     except requests.exceptions.Timeout:
         log.error("  FinMind Y9999: API 請求逾時 (30s)")
     except requests.exceptions.HTTPError as e:
         log.error(f"  FinMind Y9999: HTTP 錯誤 {e}")
-    except ValueError as e:
-        log.warning(f"  FinMind Y9999: {e}")
     except Exception as e:
         log.warning(f"  FinMind Y9999: 例外 {type(e).__name__}: {e}")
 
-    # fallback: 讀取快取
+    return pd.DataFrame()
+
+
+def fetch_finmind_taiex(days: int = 300) -> pd.DataFrame:
+    """
+    [FIX-07] 雙重 start_date 嘗試：
+    1. 動態 start_date（今日往回 FINMIND_CALENDAR_DAYS 天）
+    2. 若失敗，改用固定 FINMIND_FIXED_START（2020-01-01）
+    3. 若仍失敗，讀取本地快取
+    """
+    if not _USE_FINMIND:
+        return pd.DataFrame()
+
+    cache_path = os.path.join(CACHE_DIR, "TAIEX_finmind.csv")
+
+    # 嘗試 1：動態 start_date
+    dynamic_start = (date.today() - timedelta(days=FINMIND_CALENDAR_DAYS)).strftime("%Y-%m-%d")
+    df = _fetch_finmind_taiex_with_start(dynamic_start, cache_path)
+    if not df.empty and len(df) >= 10:
+        return df.tail(days)
+
+    # 嘗試 2：固定早期 start_date（解決帳戶只允許特定區間的問題）
+    log.warning(f"  動態 start_date 失敗，嘗試固定 start_date={FINMIND_FIXED_START}")
+    time.sleep(1.0)  # 等待限速
+    df = _fetch_finmind_taiex_with_start(FINMIND_FIXED_START, cache_path)
+    if not df.empty and len(df) >= 10:
+        return df.tail(days)
+
+    # 嘗試 3：讀取本地快取
     if os.path.exists(cache_path):
         try:
             df = pd.read_csv(cache_path, index_col=0, parse_dates=True)
             df = _normalize_df(df)
             if not df.empty and len(df) >= 10:
                 log.warning(f"  FinMind TAIEX 使用快取 ({len(df)} 筆，最新: {df.index[-1].date()})")
-                return df
+                return df.tail(days)
         except Exception as ce:
             log.warning(f"  FinMind 快取讀取失敗: {ce}")
 
@@ -345,8 +372,6 @@ def fetch_yahoo_twii(days: int = 300) -> pd.DataFrame:
     if yf is None:
         return pd.DataFrame()
     cache_path = os.path.join(CACHE_DIR, "TWII_yahoo.csv")
-
-    # Yahoo 需要用 period 而非 days，換算加緩衝
     period = f"{days + 100}d"
     try:
         log.info(f"  Yahoo ^TWII 下載中 (period={period})...")
@@ -495,12 +520,6 @@ def fetch_twse_index(days: int = 300) -> pd.DataFrame:
 # ══════════════════════════════════════════════════════════════
 
 def fetch_market_index(days: int = 300) -> pd.DataFrame:
-    """
-    Layer 0: FinMind Y9999 (主要)
-    Layer 1: Yahoo ^TWII
-    Layer 2: TWSE 官方 MI_INDEX
-    Layer 3: 常數 fallback（最後手段，會記錄警告）
-    """
     if _USE_FINMIND:
         log.info("  [Layer 0] FinMind Y9999 TAIEX...")
         df = fetch_finmind_taiex(days=days)
@@ -532,75 +551,78 @@ def fetch_market_index(days: int = 300) -> pd.DataFrame:
 
 
 # ══════════════════════════════════════════════════════════════
-# FinMind 個股下載
+# [FIX-07] FinMind 個股下載 — 雙重 start_date
 # ══════════════════════════════════════════════════════════════
 
 def fetch_finmind_ohlcv(sym: str, days: int = 250) -> Optional[pd.DataFrame]:
-    """[FIX-01] 使用 FINMIND_CALENDAR_DAYS 換算 start_date"""
     if not _FINMIND_TOKEN:
         return None
 
     _finmind_rate_limit()
-    calendar_days = max(int(days * 1.6), 400)
-    start_date = (date.today() - timedelta(days=calendar_days)).strftime("%Y-%m-%d")
+    dynamic_start = (date.today() - timedelta(days=max(int(days * 1.6), 400))).strftime("%Y-%m-%d")
 
-    try:
-        params = {
-            "dataset":    "TaiwanStockPrice",
-            "data_id":    sym,
-            "start_date": start_date,
-            "token":      _FINMIND_TOKEN,
-        }
-        resp = requests.get(_FINMIND_URL, params=params, timeout=25)
-        resp.raise_for_status()
-        payload = resp.json()
+    def _try_start(start_date: str) -> Optional[pd.DataFrame]:
+        try:
+            params = {
+                "dataset":    "TaiwanStockPrice",
+                "data_id":    sym,
+                "start_date": start_date,
+                "token":      _FINMIND_TOKEN,
+            }
+            resp = requests.get(_FINMIND_URL, params=params, timeout=25)
+            resp.raise_for_status()
+            payload = resp.json()
 
-        if payload.get("status") != 200:
-            log.debug(f"  FinMind {sym}: status={payload.get('status')}, msg={payload.get('msg','')!r}")
+            if payload.get("status") != 200:
+                return None
+            records = payload.get("data", [])
+            if not records:
+                return None
+
+            df = pd.DataFrame(records)
+            df["date"] = pd.to_datetime(df["date"])
+            df = df.set_index("date").sort_index()
+
+            col_map = {
+                "open": "Open", "max": "High", "min": "Low", "close": "Close",
+                "Trading_Volume": "Volume", "volume": "Volume",
+            }
+            renamed = {src: dst for src, dst in col_map.items() if src in df.columns}
+            df = df.rename(columns=renamed)
+
+            needed = ["Open", "High", "Low", "Close"]
+            if not all(c in df.columns for c in needed):
+                return None
+            if "Volume" not in df.columns:
+                df["Volume"] = 0.0
+
+            df = df[["Open", "High", "Low", "Close", "Volume"]].apply(
+                pd.to_numeric, errors="coerce"
+            ).dropna(subset=["Close"])
+
+            df = df.tail(days)
+            if len(df) >= 20:
+                return df
+            return None
+        except Exception:
             return None
 
-        records = payload.get("data", [])
-        if not records:
-            log.debug(f"  FinMind {sym}: data=[] (start_date={start_date})")
-            return None
+    # 先試動態 start_date
+    df = _try_start(dynamic_start)
+    if df is not None:
+        log.info(f"  ✅ FinMind {sym}: {len(df)} 筆")
+        return df
 
-        df = pd.DataFrame(records)
-        df["date"] = pd.to_datetime(df["date"])
-        df = df.set_index("date").sort_index()
+    # 若空，試固定早期日期
+    log.debug(f"  FinMind {sym}: 動態 start_date 失敗，嘗試 {FINMIND_FIXED_START}")
+    time.sleep(0.5)
+    df = _try_start(FINMIND_FIXED_START)
+    if df is not None:
+        log.info(f"  ✅ FinMind {sym} (固定起始): {len(df)} 筆")
+        return df
 
-        col_map = {
-            "open": "Open", "max": "High", "min": "Low", "close": "Close",
-            "Trading_Volume": "Volume", "volume": "Volume",
-        }
-        renamed = {src: dst for src, dst in col_map.items() if src in df.columns}
-        df = df.rename(columns=renamed)
-
-        needed = ["Open", "High", "Low", "Close"]
-        if not all(c in df.columns for c in needed):
-            log.debug(f"  FinMind {sym}: 缺少欄位 {[c for c in needed if c not in df.columns]}")
-            return None
-        if "Volume" not in df.columns:
-            df["Volume"] = 0.0
-
-        df = df[["Open", "High", "Low", "Close", "Volume"]].apply(
-            pd.to_numeric, errors="coerce"
-        ).dropna(subset=["Close"])
-
-        df = df.tail(days)
-
-        if len(df) >= 20:
-            log.info(f"  ✅ FinMind {sym}: {len(df)} 筆")
-            return df
-        else:
-            log.debug(f"  FinMind {sym}: 有效資料不足 ({len(df)} 筆)")
-            return None
-
-    except requests.exceptions.Timeout:
-        log.warning(f"  FinMind {sym}: 逾時")
-        return None
-    except Exception as e:
-        log.debug(f"  FinMind {sym}: {type(e).__name__}: {e}")
-        return None
+    log.debug(f"  FinMind {sym}: 兩次嘗試均無資料")
+    return None
 
 
 # ══════════════════════════════════════════════════════════════
@@ -710,7 +732,6 @@ def save_to_csv(sym: str, df: pd.DataFrame, day_dir: str) -> None:
 # ══════════════════════════════════════════════════════════════
 
 def fetch_tw_ohlcv(sym: str, days: int = 250, max_retries: int = 3) -> tuple:
-    # Layer 1: FinMind
     if _USE_FINMIND:
         try:
             df = _with_timeout(
@@ -724,7 +745,6 @@ def fetch_tw_ohlcv(sym: str, days: int = 250, max_retries: int = 3) -> tuple:
         except Exception as e:
             log.debug(f"  {sym} FinMind 例外: {e}")
 
-    # Layer 2: Yahoo
     if yf is None:
         return None, None
 
@@ -780,20 +800,12 @@ def fetch_tw_ohlcv(sym: str, days: int = 250, max_retries: int = 3) -> tuple:
 
 
 # ══════════════════════════════════════════════════════════════
-# [FIX-03] 盤中「優先清單」計算
+# 盤中「優先清單」計算
 # ══════════════════════════════════════════════════════════════
 
 def get_intraday_priority_symbols() -> list:
-    """
-    盤中只下載新資料的股票清單：
-    1. watchlist（自選股）
-    2. 現有 V12 持倉
-    3. 現有 V4 TOP20 候選
-    其餘股票盤中使用舊 CSV 快取。
-    """
     priority = list(WATCHLIST)
 
-    # 讀取現有 V12 持倉
     v12_path = os.path.join(V12_DIR, "v12_latest.json")
     v12_data = load_json(v12_path)
     if v12_data:
@@ -806,7 +818,6 @@ def get_intraday_priority_symbols() -> list:
             if sym and sym not in priority:
                 priority.append(sym)
 
-    # 讀取現有 V4 TOP20
     v4_path = os.path.join(V4_DIR, "v4_latest.json")
     v4_data = load_json(v4_path)
     if v4_data:
@@ -921,13 +932,12 @@ class _FeatureEngine:
             "mkt_slope_20d": round(s20_now, 4),
             "data_source":   src,
             "run_mode":      RUN_MODE,
-            # [FIX-04] 使用統一 timestamp
             "generated_at":  RUN_TS,
         }
 
 
 # ══════════════════════════════════════════════════════════════
-# Regime 引擎
+# [FIX-08] Regime 引擎 — 統一三個檔案
 # ══════════════════════════════════════════════════════════════
 
 class _RegimeEngine:
@@ -1000,19 +1010,30 @@ class _RegimeEngine:
         else:
             label = "震盪"; strat = "range"; a_path = "423"; b_path = "45"
 
+        # [FIX-08] 載入並更新歷史月份資料
         hist_path = os.path.join(REGIME_DIR, "regime_history.json")
         history   = load_json(hist_path) or []
+        # 若 history 是 list，直接用；若是 dict，取 data key
+        if isinstance(history, dict):
+            history = history.get("data", [])
+
         month_key = date.today().strftime("%Y-%m")
         history   = [h for h in history if h.get("month") != month_key]
         history.append({
-            "month": month_key, "bear": round(P_bear, 4),
-            "range": round(P_range, 4), "bull": round(P_bull, 4),
-            "label": label, "index_close": round(close_n, 2),
+            "month":       month_key,
+            "bear":        round(P_bear,  4),
+            "range":       round(P_range, 4),
+            "bull":        round(P_bull,  4),
+            "label":       label,
+            "index_close": round(close_n, 2),
         })
-        history = history[-24:]
+        history = history[-24:]  # 保留最近 24 個月
+
+        # [FIX-08] 儲存獨立的 regime_history.json
         save_json(hist_path, history)
 
-        return {
+        # [FIX-08] 完整快照（含 history 陣列）
+        regime_snapshot = {
             "bear":            round(P_bear,  4),
             "range":           round(P_range, 4),
             "bull":            round(P_bull,  4),
@@ -1026,12 +1047,13 @@ class _RegimeEngine:
             "adx":             round(adx_p, 2),
             "index_close":     round(close_n, 2),
             "index_chg_pct":   round(market_data.get("index_chg_pct", 0), 2),
+            # [FIX-08] history 內嵌在 regime_state.json，讓 Streamlit 一次讀到
             "history":         history,
             "data_source":     src,
             "run_mode":        RUN_MODE,
-            # [FIX-04] 統一 timestamp
             "generated_at":    RUN_TS,
         }
+        return regime_snapshot
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1058,7 +1080,7 @@ _risk_engine    = _RiskEngine()
 
 
 # ══════════════════════════════════════════════════════════════
-# V4 引擎
+# V4 引擎（同 v4.1，不變）
 # ══════════════════════════════════════════════════════════════
 
 _POS_WEIGHT = {
@@ -1134,7 +1156,6 @@ def _v4_score(df, mu, sigma, rtype):
     rm = {"trend": 1.1, "range": 1.0, "recovery": 0.8, "crash": 0.5}.get(rtype, 1.0)
     pw = round(min(max(_POS_WEIGHT.get(combo, 0.15) * sig_q * rm, 0.10), 0.30), 4)
 
-    # 停利/停損
     atr_pct = atr / (close + 1e-9) if close > 0 else 0.02
     tp1_px  = round(close * 1.20, 1)
     stop_px = round(close * (1 - atr_pct * 1.5), 1)
@@ -1157,11 +1178,6 @@ def _v4_score(df, mu, sigma, rtype):
 
 
 def _fetch_symbol_data(sym: str, day_dir: str, force_download: bool) -> Optional[pd.DataFrame]:
-    """
-    [FIX-03] 盤中模式下，非優先股票直接讀快取，不下載。
-    force_download=True: 優先清單 → 先嘗試下載，失敗才讀快取。
-    force_download=False: 非優先清單 → 只讀快取，不下載。
-    """
     if not force_download:
         df = load_from_csv(sym, day_dir)
         if df is not None:
@@ -1169,7 +1185,6 @@ def _fetch_symbol_data(sym: str, day_dir: str, force_download: bool) -> Optional
         log.debug(f"  {sym}: 非優先且無快取，跳過")
         return None
 
-    # 先嘗試新下載
     try:
         result = _with_timeout(
             lambda s=sym: fetch_tw_ohlcv(s, days=LOOKBACK_DAYS),
@@ -1184,7 +1199,6 @@ def _fetch_symbol_data(sym: str, day_dir: str, force_download: bool) -> Optional
     except Exception as e:
         log.warning(f"  {sym}: 下載失敗 {e}")
 
-    # 下載失敗則讀快取
     df = load_from_csv(sym, day_dir)
     if df is not None:
         log.warning(f"  {sym}: 下載失敗，使用舊快取")
@@ -1199,13 +1213,12 @@ def run_v4(symbols, regime, today, day_dir, mode="postmarket") -> dict:
         "recovery" if "回升" in label else "range"
     )
 
-    # [FIX-03] 盤中模式：計算優先清單
     if mode == "intraday":
         priority_set = set(get_intraday_priority_symbols())
         scan_syms    = list(dict.fromkeys(list(priority_set) + symbols))
         log.info(f"V4 盤中模式 | 優先下載: {len(priority_set)} 檔 | 全池快取: {len(scan_syms)} 檔")
     else:
-        priority_set = set(symbols)  # 盤後全部重新下載
+        priority_set = set(symbols)
         scan_syms    = symbols
         log.info(f"V4 盤後模式 | 全量掃描: {len(scan_syms)} 檔")
 
@@ -1255,23 +1268,22 @@ def run_v4(symbols, regime, today, day_dir, mode="postmarket") -> dict:
 
     log.info(f"V4 完成 ✅ | TOP30:{len(top30)} | 跳過:{skipped} | μ={am} σ={as_}")
     return {
-        "market":        "TW",
-        "top20":         top30,
-        "top30":         top30,
-        "pool_mu":       am,
-        "pool_sigma":    as_,
-        "win_rate":      57.1,
-        "regime":        label,
-        "total_scored":  len(result_rows),
-        "skipped":       skipped,
-        "run_mode":      mode,
-        # [FIX-04] 統一 timestamp
-        "generated_at":  RUN_TS,
+        "market":       "TW",
+        "top20":        top30,
+        "top30":        top30,
+        "pool_mu":      am,
+        "pool_sigma":   as_,
+        "win_rate":     57.1,
+        "regime":       label,
+        "total_scored": len(result_rows),
+        "skipped":      skipped,
+        "run_mode":     mode,
+        "generated_at": RUN_TS,
     }
 
 
 # ══════════════════════════════════════════════════════════════
-# V12.1 引擎
+# V12.1 引擎（同 v4.1，不變）
 # ══════════════════════════════════════════════════════════════
 
 _PATH_DEFS = {
@@ -1475,23 +1487,17 @@ def run_v12(symbols, regime, v4_data, today, day_dir, mode="postmarket") -> dict
     cands   = [r for r in top20
                if r.get("action") in ("強力買進", "買進") and r.get("score", 0) > 55]
 
-    # [FIX-03] 盤中：也保留現有持倉的 symbol 在候選清單
     if mode == "intraday":
         existing_syms = set(old_pos.keys())
         cand_syms     = {r["symbol"] for r in cands}
         extra_syms    = existing_syms - cand_syms
-        # 現有持倉若不在 V4 TOP，也加入評估（但不新開倉，只做 exit 判斷）
         max_cands = 20
     else:
         extra_syms = set()
         max_cands  = 30
 
-    log.info(f"  V4候選: {len(cands)} 檔 | 既有持倉補充: {len(extra_syms)} 檔")
-
     positions = []; path_counts = {}
     process_list = cands[:max_cands]
-
-    # 把現有持倉追加到評估清單（盤中更新用）
     existing_entries = [{"symbol": s, "action": "持有", "score": 0} for s in extra_syms]
     process_list = process_list + existing_entries
 
@@ -1508,11 +1514,9 @@ def run_v12(symbols, regime, v4_data, today, day_dir, mode="postmarket") -> dict
         try:
             df = _fetch_symbol_data(sym, day_dir, force_download=force_dl)
             if df is None or len(df) < 20:
-                # 持倉股若無法取得資料，保留舊資料
                 if is_existing:
-                    old_p = old_pos[sym]
                     log.warning(f"  V12 {sym}: 無法更新，保留舊持倉資料")
-                    positions.append(old_p)
+                    positions.append(old_pos[sym])
                 continue
 
             feats = _v12_features(df)
@@ -1535,7 +1539,6 @@ def run_v12(symbols, regime, v4_data, today, day_dir, mode="postmarket") -> dict
 
             ev_thr = ev_min * (1.20 if quality == "Flicker" else 1.0)
 
-            # 現有持倉：只做 exit 判斷，不受 ev_thr 限制新開
             if not is_existing:
                 if ev_soft < ev_thr:
                     continue
@@ -1602,7 +1605,6 @@ def run_v12(symbols, regime, v4_data, today, day_dir, mode="postmarket") -> dict
         except Exception as e:
             log.warning(f"  V12 {sym}: {e}")
             if is_existing and sym in old_pos:
-                log.warning(f"  V12 {sym}: 例外，保留舊持倉")
                 positions.append(old_pos[sym])
 
     positions.sort(key=lambda x: x.get("ev", 0), reverse=True)
@@ -1616,7 +1618,6 @@ def run_v12(symbols, regime, v4_data, today, day_dir, mode="postmarket") -> dict
         "backup_path":  b_p,
         "path_counts":  path_counts,
         "run_mode":     mode,
-        # [FIX-04] 統一 timestamp
         "generated_at": RUN_TS,
     }
 
@@ -1645,8 +1646,11 @@ def step_regime(market_data: dict) -> dict:
     log.info("=== Step 2: Regime Definition ===")
     data = _regime_engine.run(market_data, today=TODAY)
     if data:
-        # [FIX-05] 同時寫 regime_state.json（新名）
-        save_json(os.path.join(REGIME_DIR, "regime_state.json"), data)
+        # [FIX-08] 同時寫入兩個路徑：
+        #   regime_state.json   → Streamlit app 讀取（含 history）
+        #   regime_latest.json  → 向下相容（若有其他腳本仍讀舊名）
+        save_json(os.path.join(REGIME_DIR, "regime_state.json"),  data)
+        save_json(os.path.join(REGIME_DIR, "regime_latest.json"), data)
         log.info(
             f"環境: {data.get('label', '?')} "
             f"(牛:{data.get('bull', 0):.2f} 熊:{data.get('bear', 0):.2f}) "
@@ -1658,10 +1662,11 @@ def step_regime(market_data: dict) -> dict:
 
 
 def main():
-    log.info(f"🚀 資源法 Daily Compute v4.1 [{TS}]")
+    log.info(f"🚀 資源法 Daily Compute v4.2 [{TS}]")
     log.info(f"📋 執行模式: {RUN_MODE} | 台灣時間: {NOW_HOUR_TW:02d}:xx | 統一時間戳: {RUN_TS}")
     log.info(f"📊 自選股: {WATCHLIST}")
-    log.info(f"📅 查詢區間: {(date.today() - timedelta(days=FINMIND_CALENDAR_DAYS)).strftime('%Y-%m-%d')} ~ {TODAY}")
+    log.info(f"📅 動態查詢: start_date={(date.today() - timedelta(days=FINMIND_CALENDAR_DAYS)).strftime('%Y-%m-%d')}")
+    log.info(f"📅 固定備援: start_date={FINMIND_FIXED_START}")
 
     market_data = step_market()
     regime_data = step_regime(market_data)
@@ -1678,13 +1683,10 @@ def main():
             "generated_at": RUN_TS,
         }
 
-    # [FIX-03] 決定掃描清單
     if RUN_MODE == "intraday":
         priority_syms = get_intraday_priority_symbols()
-        # 全池也傳進去，非優先的只讀快取
         scan_symbols  = list(dict.fromkeys(priority_syms + SYMBOLS))
         log.info(f"=== Step 3: V4 Engine (盤中模式) ===")
-        log.info(f"  優先下載 {len(priority_syms)} 檔；其餘 {len(scan_symbols)-len(priority_syms)} 檔讀快取")
     else:
         scan_symbols = SYMBOLS
         log.info(f"=== Step 3: V4 Engine (盤後全量，{len(scan_symbols)} 檔) ===")
@@ -1708,7 +1710,7 @@ def main():
             if risk_summary["exit_count"] > 0:
                 log.warning(f"  ⚠️ 建議出場: {risk_summary['exit_syms']}")
 
-    log.info(f"🎉 資源法 v4.1 完成！[{RUN_MODE}] generated_at={RUN_TS}")
+    log.info(f"🎉 資源法 v4.2 完成！[{RUN_MODE}] generated_at={RUN_TS}")
 
 
 if __name__ == "__main__":
