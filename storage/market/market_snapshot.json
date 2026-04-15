@@ -6,6 +6,6 @@
   "mkt_slope_5d": 0.0041,
   "mkt_slope_20d": 0.0165,
   "data_source": "FinMind_Y9999_TAIEX",
-  "run_mode": "postmarket",
-  "generated_at": "2026-04-14 19:04"
+  "run_mode": "intraday",
+  "generated_at": "2026-04-15 11:49"
 }

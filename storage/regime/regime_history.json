@@ -4,6 +4,7 @@
     "bear": 0.0,
     "range": 0.3,
     "bull": 0.7,
-    "label": "牛市"
+    "label": "牛市",
+    "index_close": 21000.0
   }
 ]

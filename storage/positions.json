@@ -1,5 +1,4 @@
 {
-  "market": "TW",
   "positions": [
     {
       "symbol": "3406",
@@ -116,22 +115,6 @@
       "is_watchlist": false
     }
   ],
-  "stats": {
-    "total_trades": 112,
-    "win_rate": 57.1,
-    "avg_ev": 5.29,
-    "max_dd": -6.58,
-    "sharpe": 5.36,
-    "t_stat": 4.032,
-    "simple_cagr": 96.9,
-    "pl_ratio": 2.31
-  },
-  "regime": "bull",
-  "active_path": "45",
-  "backup_path": "423",
-  "path_counts": {
-    "45": 3
-  },
-  "run_mode": "intraday",
-  "generated_at": "2026-04-15 11:49"
+  "generated_at": "2026-04-15 11:49",
+  "source": "synced_from_v12_latest"
 }

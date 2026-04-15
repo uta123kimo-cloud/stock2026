@@ -11,16 +11,18 @@
   "mkt_rsi": 100.0,
   "adx": 24.81,
   "index_close": 21000.0,
+  "index_chg_pct": 0.08,
   "history": [
     {
       "month": "2026-04",
       "bear": 0.0,
       "range": 0.3,
       "bull": 0.7,
-      "label": "牛市"
+      "label": "牛市",
+      "index_close": 21000.0
     }
   ],
   "data_source": "FinMind_Y9999_TAIEX",
-  "run_mode": "postmarket",
-  "generated_at": "2026-04-14 19:04"
+  "run_mode": "intraday",
+  "generated_at": "2026-04-15 11:49"
 }
