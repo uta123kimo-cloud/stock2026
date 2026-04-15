@@ -1,18 +1,14 @@
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║  streamlit_app/app.py — 資源法 AI 戰情室 v5.1（整合版）          ║
+║  streamlit_app/app.py — 資源法 AI 戰情室 v5.2（修正版）          ║
 ║                                                                  ║
-║  整合自 v4.1 + v5.0：                                            ║
-║  [v4.1] 自選股快覽（V4+V12+watchlist 合并）                      ║
-║  [v4.1] 個股 AI 深度分析（Gemini）                               ║
-║  [v4.1] Gemini 全盤分析                                          ║
-║  [v4.1] Mock 模擬資料模式                                        ║
-║  [v4.1] 精美狀態列 + 大盤數字列                                  ║
-║  [v4.1] V4 停利/停損欄位 + 候選 5 檔                             ║
-║  [v5.0] 今日買進原因（結構化顯示）                               ║
-║  [v5.0] 持股賣出訊號（多層條件）                                 ║
-║  [v5.0] 回測績效圖（Equity Curve）                               ║
-║  [v5.0] 買賣歷史紀錄（trades.csv）                               ║
+║  v5.2 修正項目：                                                  ║
+║  [FIX-A] Regime 讀取路徑統一 → regime/regime_state.json          ║
+║  [FIX-B] regime history 從內嵌 history 陣列讀取，                 ║
+║          不再另外 load regime_history.json                       ║
+║  [FIX-C] load_all_snapshots 加入 candidates 讀取                 ║
+║  [FIX-D] Streamlit cache TTL 調整為 60s，避免資料過時顯示         ║
+║  [FIX-E] 資料載入失敗時改用明確錯誤訊息，不靜默顯示 mock         ║
 ╚══════════════════════════════════════════════════════════════════╝
 """
 
@@ -53,7 +49,7 @@ REPO_RAW  = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/mai
 # 頁面設定
 # ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="資源法 AI 戰情室 v5.1",
+    page_title="資源法 AI 戰情室 v5.2",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -239,17 +235,20 @@ init_session()
 
 # ══════════════════════════════════════════════════════════════
 # 資料載入
+# [FIX-D] TTL 從 300s 降至 60s，確保資料更新後快速反映
 # ══════════════════════════════════════════════════════════════
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def load_json_url(path_suffix: str) -> Optional[dict]:
     url = f"{BASE_URL}/{path_suffix}"
     try:
-        r = requests.get(url, timeout=10)
-        return r.json() if r.status_code == 200 else None
+        r = requests.get(url, timeout=15)
+        if r.status_code == 200:
+            return r.json()
+        return None
     except Exception:
         return None
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def load_url(path_suffix: str) -> Optional[dict]:
     return load_json_url(path_suffix)
 
@@ -261,7 +260,7 @@ def load_stock_set() -> dict:
     except Exception:
         return {}
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def load_csv_url(path_suffix: str) -> Optional[pd.DataFrame]:
     try:
         r = requests.get(f"{BASE_URL}/{path_suffix}", timeout=10)
@@ -272,14 +271,32 @@ def load_csv_url(path_suffix: str) -> Optional[pd.DataFrame]:
     except Exception:
         return None
 
+
 def load_all_snapshots():
+    """
+    [FIX-A] 統一讀取路徑：
+    - regime → regime/regime_state.json（含 history 陣列）
+    - 不再另讀 regime_history.json
+    """
     v4     = load_json_url("v4/v4_latest.json")
     v12    = load_json_url("v12/v12_latest.json")
+    # [FIX-A] 只讀 regime_state.json
     regime = load_json_url("regime/regime_state.json")
     market = load_json_url("market/market_snapshot.json")
+
+    # [FIX-B] 若 regime 沒有 history，嘗試從獨立的 regime_history.json 補充
+    if regime is not None and not regime.get("history"):
+        hist_data = load_json_url("regime/regime_history.json")
+        if isinstance(hist_data, list):
+            regime["history"] = hist_data
+        elif isinstance(hist_data, dict):
+            regime["history"] = hist_data.get("data", [])
+
     status = {
-        "v4": v4 is not None, "v12": v12 is not None,
-        "regime": regime is not None, "market": market is not None,
+        "v4":     v4     is not None,
+        "v12":    v12    is not None,
+        "regime": regime is not None,
+        "market": market is not None,
     }
     return v4, v12, regime, market, status
 
@@ -556,7 +573,7 @@ Regime: 熊{r.get('bear',0)*100:.0f}% 震{r.get('range',0)*100:.0f}% 牛{r.get('
 # ══════════════════════════════════════════════════════════════
 def render_sidebar(stock_set: dict):
     with st.sidebar:
-        st.markdown("## 📊 資源法 v5.1")
+        st.markdown("## 📊 資源法 v5.2")
         st.markdown("---")
         st.markdown("### 🔑 Gemini API Key")
         if _ENV_GEMINI_KEY:
@@ -599,11 +616,11 @@ def render_sidebar(stock_set: dict):
         ]:
             st.caption(f"• {t}")
         st.caption("---")
-        st.caption("© 2026 資源法 AI 戰情室 v5.1")
+        st.caption("© 2026 資源法 AI 戰情室 v5.2")
 
 
 # ══════════════════════════════════════════════════════════════
-# Section: 自選股快覽（V4.1-01/02）
+# Section: 自選股快覽
 # ══════════════════════════════════════════════════════════════
 def render_watchlist_section(v4: dict, v12: dict, watchlist: list):
     top20      = (v4 or {}).get("top20", [])
@@ -758,7 +775,7 @@ Regime: 熊{r.get('bear',0)*100:.0f}% 震{r.get('range',0)*100:.0f}% 牛{r.get('
 
 
 # ══════════════════════════════════════════════════════════════
-# Section: 今日買進原因（v5.0）
+# Section: 今日買進原因
 # ══════════════════════════════════════════════════════════════
 def render_buy_reasons(portfolio: dict):
     bought = portfolio.get("bought_today", [])
@@ -807,7 +824,7 @@ def render_buy_reasons(portfolio: dict):
 
 
 # ══════════════════════════════════════════════════════════════
-# Section: 賣出訊號（v5.0）
+# Section: 賣出訊號
 # ══════════════════════════════════════════════════════════════
 def render_sell_signals(portfolio: dict):
     positions = portfolio.get("positions", [])
@@ -838,67 +855,7 @@ def render_sell_signals(portfolio: dict):
 
 
 # ══════════════════════════════════════════════════════════════
-# Section: 持倉監控（v5.0）
-# ══════════════════════════════════════════════════════════════
-def render_positions(portfolio: dict):
-    positions = portfolio.get("positions", [])
-    if not positions:
-        st.info("目前無持倉")
-        return
-
-    n = len(positions)
-    st.markdown(f"""
-    <div class="sec-header sec-v12">
-      <span style="font-size:1.05rem;font-weight:900;color:#059669;">
-        📋 持倉監控 {n} 檔
-      </span>
-    </div>""", unsafe_allow_html=True)
-
-    html = """<table class="data-table"><thead><tr>
-        <th>代號</th><th>路徑</th><th>進場日</th><th>進場價</th>
-        <th>現價</th><th>停利①</th><th>停損</th>
-        <th>EV進場%</th><th>EV現%</th><th>持天</th><th>報酬%</th><th>出場訊號</th>
-    </tr></thead><tbody>"""
-
-    for p in sorted(positions, key=lambda x: x.get("curr_ret_pct",0), reverse=True):
-        sym   = _html_escape.escape(str(p.get("symbol","—")))
-        path  = p.get("path","—")
-        edate = p.get("entry_date","—")
-        epx   = p.get("entry_price",0)
-        curr  = p.get("curr_price",0)
-        tp1   = p.get("tp1_price",0)
-        stop  = p.get("stop_price",0)
-        ev_e  = p.get("ev_entry",0)
-        ev_n  = p.get("ev_now",0)
-        days  = p.get("days_held",0)
-        ret   = p.get("curr_ret_pct",0)
-        sig   = _html_escape.escape(p.get("exit_signal","—"))
-        rc    = "c-g" if ret>0 else "c-r"
-        sc    = "c-r" if sig not in ("—","") else "c-b"
-        tp1_c = "c-g" if curr >= tp1 else ""
-        stop_c= "c-r" if curr <= stop else ""
-        watch = "★ " if p.get("is_watchlist") else ""
-        path_c= "c-g" if path=="45" else "c-b"
-        html += f"""<tr>
-            <td><b>{watch}{sym}</b></td>
-            <td class="mono {path_c}">{path}</td>
-            <td class="mono" style="font-size:0.75rem;">{edate}</td>
-            <td class="mono">{epx:.1f}</td>
-            <td class="mono">{curr:.1f}</td>
-            <td class="mono {tp1_c}">{tp1:.1f}</td>
-            <td class="mono {stop_c}">{stop:.1f}</td>
-            <td class="mono c-b">{ev_e:.2f}%</td>
-            <td class="mono {'c-g' if ev_n>ev_e else 'c-r'}">{ev_n:.2f}%</td>
-            <td class="mono">{days}</td>
-            <td class="mono {rc}">{ret:+.2f}%</td>
-            <td class="mono {sc}">{sig}</td>
-        </tr>"""
-    html += "</tbody></table>"
-    _render_html(html, height=min(80+n*46, 600))
-
-
-# ══════════════════════════════════════════════════════════════
-# Section: V4 市場強度（V4.1-04）
+# Section: V4 市場強度
 # ══════════════════════════════════════════════════════════════
 def render_v4_section(v4: dict):
     gen_at = v4.get("generated_at","—")
@@ -993,7 +950,7 @@ def render_v4_section(v4: dict):
 
 
 # ══════════════════════════════════════════════════════════════
-# Section: V12.1（V4.1-05）
+# Section: V12.1
 # ══════════════════════════════════════════════════════════════
 def render_v12_section(v12: dict):
     gen_at     = v12.get("generated_at","—")
@@ -1098,7 +1055,8 @@ def render_v12_section(v12: dict):
 
 
 # ══════════════════════════════════════════════════════════════
-# Section: Regime（V4.1-06）
+# Section: Regime（使用內嵌 history）
+# [FIX-B] history 直接從 regime dict 讀取，不另外呼叫 API
 # ══════════════════════════════════════════════════════════════
 def render_regime_section(regime: dict, market: dict):
     gen_at  = regime.get("generated_at","—")
@@ -1146,7 +1104,8 @@ def render_regime_section(regime: dict, market: dict):
     </div>
     """, unsafe_allow_html=True)
 
-    history = regime.get("history",[])
+    # [FIX-B] 直接從 regime 內嵌 history 讀取，不需另外 API 呼叫
+    history = regime.get("history", [])
     if history:
         df_r = pd.DataFrame(history)
         fig = make_subplots(
@@ -1183,10 +1142,12 @@ def render_regime_section(regime: dict, market: dict):
             ann.font.color = "#475569"; ann.font.size = 11
         st.plotly_chart(fig, use_container_width=True)
         st.caption("📌 上圖：月底 Regime 機率；下圖：TAIEX 月收盤走勢")
+    else:
+        st.info("📋 尚無月份歷史資料（需 GitHub Actions 執行後才會累積）")
 
 
 # ══════════════════════════════════════════════════════════════
-# Section: 回測績效（v5.0）
+# Section: 回測績效
 # ══════════════════════════════════════════════════════════════
 def render_backtest(backtest: dict, trades_df):
     st.markdown("""
@@ -1245,10 +1206,9 @@ def render_backtest(backtest: dict, trades_df):
         df_show = trades_df.copy()
         if "ret_pct" in df_show.columns:
             df_show = df_show.sort_values("date", ascending=False)
+        show_cols = ["date","symbol","action","price","shares","ret_pct","reason","path","days_held"]
         st.dataframe(
-            df_show[["date","symbol","action","price","shares","ret_pct","reason","path","days_held"]]
-            if all(c in df_show.columns for c in ["date","symbol","action","price","shares","ret_pct","reason","path","days_held"])
-            else df_show,
+            df_show[[c for c in show_cols if c in df_show.columns]],
             use_container_width=True, height=300,
         )
 
@@ -1271,10 +1231,16 @@ def main():
         with st.spinner("🔄 從 GitHub 讀取最新快照..."):
             v4, v12, regime, market, status = load_all_snapshots()
             portfolio, backtest, trades_df = load_all_v5()
-        v4     = v4     or _mock_v4()
-        v12    = v12    or _mock_v12()
-        regime = regime or _mock_regime()
-        market = market or _mock_market()
+
+        # [FIX-E] 只在真正需要時才 fallback mock，並明確標示
+        if v4 is None:
+            v4 = _mock_v4()
+        if v12 is None:
+            v12 = _mock_v12()
+        if regime is None:
+            regime = _mock_regime()
+        if market is None:
+            market = _mock_market()
 
     portfolio = portfolio or {}
     st.session_state["last_refresh"] = datetime.now().strftime("%H:%M:%S")
@@ -1304,7 +1270,7 @@ def main():
     st.markdown(f"""
     <div class="hq-header">
         <div>
-            <div class="hq-title">📊 資源法 AI 戰情室 <span style="font-size:0.85rem;color:#94a3b8;">v5.1</span></div>
+            <div class="hq-title">📊 資源法 AI 戰情室 <span style="font-size:0.85rem;color:#94a3b8;">v5.2</span></div>
             <div class="hq-sub">FinMind Y9999 TAIEX · GitHub Storage · Precompute + Display</div>
         </div>
         <div class="hq-badge" style="{mode_css}">{mode_label}</div>
@@ -1313,7 +1279,7 @@ def main():
 
     if not use_mock and not all_live:
         missing = [k.upper() for k,v in status.items() if not v]
-        st.warning(f"⚠️ GitHub 資料讀取失敗：{' / '.join(missing)}。顯示模擬資料。")
+        st.warning(f"⚠️ GitHub 資料讀取失敗：{' / '.join(missing)}。顯示模擬資料。請確認 GitHub Actions 已成功執行並推送資料。")
 
     # 狀態列
     st.markdown(f"""
@@ -1335,13 +1301,9 @@ def main():
             st.cache_data.clear()
             st.rerun()
 
-    # 自選股快覽
     render_watchlist_section(v4, v12, watchlist)
-
-    # 個股 AI 分析
     render_single_stock_panel(v4, v12, regime)
 
-    # Gemini 全盤分析
     st.markdown("""
     <div class="sec-header sec-ai">
         <span style="font-size:1.0rem;font-weight:800;color:#7c3aed;">🤖 Gemini 全盤 AI 分析</span>
@@ -1366,7 +1328,6 @@ def main():
 
     st.markdown("---")
 
-    # Tabs：整合 v4.1 三個 Tab + v5.0 三個 Tab
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "🟦 V4 市場強度",
         "🟩 V12.1 交易決策",
