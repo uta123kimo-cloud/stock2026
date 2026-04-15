@@ -164,7 +164,7 @@ jobs:
             echo "🚀 成功找到主程式：$SCRIPT_PATH"
             python "$SCRIPT_PATH"
           fi
-        continue-on-error: true
+       
 
       # ── Step 10: 重試（首次失敗時）─────────────────────────
       - name: 重試主計算 (若首次失敗)
