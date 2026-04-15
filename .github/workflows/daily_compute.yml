@@ -145,48 +145,60 @@ jobs:
               except Exception as e:
                   print(f"⚠️ FinMind 測試失敗: {e}")
 
-      # ── Step 9: 運行主計算 (自動找檔版) ───────────────────────
+      # ── Step 9: 運行主計算 (強化版：自動建立路徑 + 錯誤偵測) ──────────
       - name: 運行計算 (主要)
         id: compute_run
         run: |
           echo "🕐 台灣時間: $(TZ=Asia/Taipei date)"
           echo "📋 執行模式: $RUN_MODE"
           
+          # 【關鍵修正】強制建立資料夾，防止 Python 存檔失敗
+          mkdir -p storage/regime
+          mkdir -p data/daily
+          echo "✅ 系統資料夾已準備完畢"
+
           # 自動在全專案尋找 daily_run.py
           SCRIPT_PATH=$(find . -name "daily_run.py" | head -n 1)
           
           if [ -z "$SCRIPT_PATH" ]; then
-            echo "❌ 錯誤：整個專案都找不到 daily_run.py！"
-            echo "🔍 目前專案的檔案結構如下："
+            echo "❌ 錯誤：專案中找不到 daily_run.py！"
             ls -R
             exit 1
           else
             echo "🚀 成功找到主程式：$SCRIPT_PATH"
+            # 執行 Python，若失敗則此步驟會顯示紅燈
             python "$SCRIPT_PATH"
           fi
-       
 
-      # ── Step 10: 重試（首次失敗時）─────────────────────────
+      # ── Step 10: 重試機制 (僅在失敗時觸發) ────────────────────────
       - name: 重試主計算 (若首次失敗)
         if: steps.compute_run.outcome == 'failure'
         run: |
-          echo "⚠️ 首次失敗，等待 90s 後重試..."
+          echo "⚠️ 首次失敗，可能是 API 延遲。等待 90s 後重試..."
           sleep 90
+          # 再次確保路徑存在
+          mkdir -p storage/regime
           SCRIPT_PATH=$(find . -name "daily_run.py" | head -n 1)
           python "$SCRIPT_PATH"
 
-      # ── Step 11: 運行 portfolio_manager (自動找檔版) ──────────
+      # ── Step 11: 運行組合管理 (確保資料產出) ─────────────────────
       - name: 運行 portfolio_manager.py
-        
         run: |
+          # 再次確認關鍵路徑，防止 Step 9 沒建立成功
+          mkdir -p storage/regime
+          
           PM_PATH=$(find . -name "portfolio_manager.py" | head -n 1)
+          
           if [ -n "$PM_PATH" ]; then
-            echo "▶️ 執行 $PM_PATH"
+            echo "▶️ 執行組合管理：$PM_PATH"
             python "$PM_PATH"
+            
+            # 【除錯檢查】印出是否有產生 JSON 檔案，確保網頁有東西讀
+            echo "🔍 目前產出的 JSON 檔案："
+            ls -lh storage/regime/
           else
-            echo "ℹ️ 找不到 portfolio_manager.py，跳過"
+            echo "ℹ️ 找不到 portfolio_manager.py，跳過此步驟"
           fi
-
      # ── Step 12: 提交並推送 (徹底修復資料不更新問題) ─────────
       - name: 提交並推送更新
         run: |
