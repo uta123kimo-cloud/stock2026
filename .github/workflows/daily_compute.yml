@@ -177,7 +177,7 @@ jobs:
 
       # ── Step 11: 運行 portfolio_manager (自動找檔版) ──────────
       - name: 運行 portfolio_manager.py
-        continue-on-error: true
+        
         run: |
           PM_PATH=$(find . -name "portfolio_manager.py" | head -n 1)
           if [ -n "$PM_PATH" ]; then
