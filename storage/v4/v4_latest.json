@@ -22,6 +22,25 @@
     },
     {
       "score": 93.0,
+      "pvo": 122.35,
+      "vri": 61.3,
+      "slope_z": 2.61,
+      "slope": 27.257,
+      "action": "強力買進",
+      "signal": "基準-強勢+量爆",
+      "combo_key": "基準-強勢",
+      "close": 73.3,
+      "atr": 3.56,
+      "pos_weight": 0.2145,
+      "tp1_price": 88.0,
+      "stop_price": 68.0,
+      "symbol": "6173",
+      "regime": "牛市",
+      "is_watchlist": false,
+      "rank": 2
+    },
+    {
+      "score": 93.0,
       "pvo": 101.68,
       "vri": 68.7,
       "slope_z": 2.77,
@@ -37,7 +56,7 @@
       "symbol": "3406",
       "regime": "牛市",
       "is_watchlist": false,
-      "rank": 2
+      "rank": 3
     },
     {
       "score": 93.0,
@@ -54,25 +73,6 @@
       "tp1_price": 3204.0,
       "stop_price": 2527.1,
       "symbol": "3008",
-      "regime": "牛市",
-      "is_watchlist": false,
-      "rank": 3
-    },
-    {
-      "score": 93.0,
-      "pvo": 122.35,
-      "vri": 61.3,
-      "slope_z": 2.61,
-      "slope": 27.257,
-      "action": "強力買進",
-      "signal": "基準-強勢+量爆",
-      "combo_key": "基準-強勢",
-      "close": 73.3,
-      "atr": 3.56,
-      "pos_weight": 0.2145,
-      "tp1_price": 88.0,
-      "stop_price": 68.0,
-      "symbol": "6173",
       "regime": "牛市",
       "is_watchlist": false,
       "rank": 4
@@ -499,6 +499,25 @@
     },
     {
       "score": 93.0,
+      "pvo": 122.35,
+      "vri": 61.3,
+      "slope_z": 2.61,
+      "slope": 27.257,
+      "action": "強力買進",
+      "signal": "基準-強勢+量爆",
+      "combo_key": "基準-強勢",
+      "close": 73.3,
+      "atr": 3.56,
+      "pos_weight": 0.2145,
+      "tp1_price": 88.0,
+      "stop_price": 68.0,
+      "symbol": "6173",
+      "regime": "牛市",
+      "is_watchlist": false,
+      "rank": 2
+    },
+    {
+      "score": 93.0,
       "pvo": 101.68,
       "vri": 68.7,
       "slope_z": 2.77,
@@ -514,7 +533,7 @@
       "symbol": "3406",
       "regime": "牛市",
       "is_watchlist": false,
-      "rank": 2
+      "rank": 3
     },
     {
       "score": 93.0,
@@ -531,25 +550,6 @@
       "tp1_price": 3204.0,
       "stop_price": 2527.1,
       "symbol": "3008",
-      "regime": "牛市",
-      "is_watchlist": false,
-      "rank": 3
-    },
-    {
-      "score": 93.0,
-      "pvo": 122.35,
-      "vri": 61.3,
-      "slope_z": 2.61,
-      "slope": 27.257,
-      "action": "強力買進",
-      "signal": "基準-強勢+量爆",
-      "combo_key": "基準-強勢",
-      "close": 73.3,
-      "atr": 3.56,
-      "pos_weight": 0.2145,
-      "tp1_price": 88.0,
-      "stop_price": 68.0,
-      "symbol": "6173",
       "regime": "牛市",
       "is_watchlist": false,
       "rank": 4
@@ -961,5 +961,5 @@
   "total_scored": 25,
   "skipped": 131,
   "run_mode": "intraday",
-  "generated_at": "2026-04-15 13:22"
+  "generated_at": "2026-04-15 13:35"
 }
