@@ -1,1 +1,28 @@
-
+{
+  "bear": 0.0,
+  "range": 0.3,
+  "bull": 0.7,
+  "label": "牛市",
+  "active_strategy": "bull",
+  "active_path": "45",
+  "backup_path": "423",
+  "slope_5d": 0.0802,
+  "slope_20d": 0.0098,
+  "mkt_rsi": 68.31,
+  "adx": 22.42,
+  "index_close": 36704.95,
+  "index_chg_pct": 1.13,
+  "history": [
+    {
+      "month": "2026-04",
+      "bear": 0.0,
+      "range": 0.3,
+      "bull": 0.7,
+      "label": "牛市",
+      "index_close": 36704.95
+    }
+  ],
+  "data_source": "FinMind_Y9999_TAIEX",
+  "run_mode": "intraday",
+  "generated_at": "2026-04-15 13:22"
+}
