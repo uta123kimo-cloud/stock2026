@@ -382,82 +382,6 @@
       "rank": 20
     },
     {
-      "score": 81.24,
-      "pvo": 26.21,
-      "vri": 54.1,
-      "slope_z": 1.27,
-      "slope": 7.619,
-      "action": "買進",
-      "signal": "基準-強勢+放量",
-      "combo_key": "基準-強勢",
-      "close": 90.4,
-      "atr": 3.94,
-      "pos_weight": 0.1815,
-      "tp1_price": 108.5,
-      "stop_price": 84.5,
-      "symbol": "5469",
-      "regime": "牛市",
-      "is_watchlist": false,
-      "rank": 21
-    },
-    {
-      "score": 80.71,
-      "pvo": 52.25,
-      "vri": 56.5,
-      "slope_z": 0.96,
-      "slope": 8.182,
-      "action": "買進",
-      "signal": "基準-持有+放量",
-      "combo_key": "基準-持有",
-      "close": 119.0,
-      "atr": 6.14,
-      "pos_weight": 0.1573,
-      "tp1_price": 142.8,
-      "stop_price": 109.8,
-      "symbol": "3305",
-      "regime": "牛市",
-      "is_watchlist": false,
-      "rank": 22
-    },
-    {
-      "score": 80.46,
-      "pvo": 37.7,
-      "vri": 51.4,
-      "slope_z": 0.93,
-      "slope": 3.927,
-      "action": "買進",
-      "signal": "基準-持有+放量",
-      "combo_key": "基準-持有",
-      "close": 172.0,
-      "atr": 8.12,
-      "pos_weight": 0.1573,
-      "tp1_price": 206.4,
-      "stop_price": 159.8,
-      "symbol": "3374",
-      "regime": "牛市",
-      "is_watchlist": false,
-      "rank": 23
-    },
-    {
-      "score": 80.19,
-      "pvo": 4.38,
-      "vri": 69.3,
-      "slope_z": 2.56,
-      "slope": 41.847,
-      "action": "買進",
-      "signal": "基準-強勢-縮量",
-      "combo_key": "基準-強勢",
-      "close": 98.3,
-      "atr": 5.7,
-      "pos_weight": 0.132,
-      "tp1_price": 118.0,
-      "stop_price": 89.7,
-      "symbol": "4989",
-      "regime": "牛市",
-      "is_watchlist": false,
-      "rank": 24
-    },
-    {
       "score": 68.29,
       "pvo": 1.53,
       "vri": 61.0,
@@ -474,7 +398,7 @@
       "symbol": "2330",
       "regime": "牛市",
       "is_watchlist": true,
-      "rank": 25
+      "rank": 21
     },
     {
       "score": 67.82,
@@ -493,7 +417,7 @@
       "symbol": "2382",
       "regime": "牛市",
       "is_watchlist": true,
-      "rank": 26
+      "rank": 22
     },
     {
       "score": 67.16,
@@ -512,7 +436,7 @@
       "symbol": "2317",
       "regime": "牛市",
       "is_watchlist": true,
-      "rank": 27
+      "rank": 23
     },
     {
       "score": 59.47,
@@ -531,7 +455,7 @@
       "symbol": "2308",
       "regime": "牛市",
       "is_watchlist": true,
-      "rank": 28
+      "rank": 24
     }
   ],
   "top30": [
@@ -916,82 +840,6 @@
       "rank": 20
     },
     {
-      "score": 81.24,
-      "pvo": 26.21,
-      "vri": 54.1,
-      "slope_z": 1.27,
-      "slope": 7.619,
-      "action": "買進",
-      "signal": "基準-強勢+放量",
-      "combo_key": "基準-強勢",
-      "close": 90.4,
-      "atr": 3.94,
-      "pos_weight": 0.1815,
-      "tp1_price": 108.5,
-      "stop_price": 84.5,
-      "symbol": "5469",
-      "regime": "牛市",
-      "is_watchlist": false,
-      "rank": 21
-    },
-    {
-      "score": 80.71,
-      "pvo": 52.25,
-      "vri": 56.5,
-      "slope_z": 0.96,
-      "slope": 8.182,
-      "action": "買進",
-      "signal": "基準-持有+放量",
-      "combo_key": "基準-持有",
-      "close": 119.0,
-      "atr": 6.14,
-      "pos_weight": 0.1573,
-      "tp1_price": 142.8,
-      "stop_price": 109.8,
-      "symbol": "3305",
-      "regime": "牛市",
-      "is_watchlist": false,
-      "rank": 22
-    },
-    {
-      "score": 80.46,
-      "pvo": 37.7,
-      "vri": 51.4,
-      "slope_z": 0.93,
-      "slope": 3.927,
-      "action": "買進",
-      "signal": "基準-持有+放量",
-      "combo_key": "基準-持有",
-      "close": 172.0,
-      "atr": 8.12,
-      "pos_weight": 0.1573,
-      "tp1_price": 206.4,
-      "stop_price": 159.8,
-      "symbol": "3374",
-      "regime": "牛市",
-      "is_watchlist": false,
-      "rank": 23
-    },
-    {
-      "score": 80.19,
-      "pvo": 4.38,
-      "vri": 69.3,
-      "slope_z": 2.56,
-      "slope": 41.847,
-      "action": "買進",
-      "signal": "基準-強勢-縮量",
-      "combo_key": "基準-強勢",
-      "close": 98.3,
-      "atr": 5.7,
-      "pos_weight": 0.132,
-      "tp1_price": 118.0,
-      "stop_price": 89.7,
-      "symbol": "4989",
-      "regime": "牛市",
-      "is_watchlist": false,
-      "rank": 24
-    },
-    {
       "score": 68.29,
       "pvo": 1.53,
       "vri": 61.0,
@@ -1008,7 +856,7 @@
       "symbol": "2330",
       "regime": "牛市",
       "is_watchlist": true,
-      "rank": 25
+      "rank": 21
     },
     {
       "score": 67.82,
@@ -1027,7 +875,7 @@
       "symbol": "2382",
       "regime": "牛市",
       "is_watchlist": true,
-      "rank": 26
+      "rank": 22
     },
     {
       "score": 67.16,
@@ -1046,7 +894,7 @@
       "symbol": "2317",
       "regime": "牛市",
       "is_watchlist": true,
-      "rank": 27
+      "rank": 23
     },
     {
       "score": 59.47,
@@ -1065,15 +913,15 @@
       "symbol": "2308",
       "regime": "牛市",
       "is_watchlist": true,
-      "rank": 28
+      "rank": 24
     }
   ],
-  "pool_mu": 82.48,
-  "pool_sigma": 7.9,
+  "pool_mu": 82.79,
+  "pool_sigma": 8.5,
   "win_rate": 57.1,
   "regime": "牛市",
-  "total_scored": 28,
-  "skipped": 128,
+  "total_scored": 24,
+  "skipped": 132,
   "run_mode": "intraday",
-  "generated_at": "2026-04-16 12:30"
+  "generated_at": "2026-04-16 13:17"
 }
