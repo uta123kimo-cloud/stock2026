@@ -20,9 +20,17 @@
       "bull": 0.7,
       "label": "牛市",
       "index_close": 38926.63
+    },
+    {
+      "month": "2026-05",
+      "bear": 0.0,
+      "range": 0.3,
+      "bull": 0.7,
+      "label": "牛市",
+      "index_close": 38926.63
     }
   ],
   "data_source": "FinMind_Y9999_TAIEX",
   "run_mode": "postmarket",
-  "generated_at": "2026-04-30 19:28"
+  "generated_at": "2026-05-01 19:06"
 }
