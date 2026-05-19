@@ -9,10 +9,10 @@
   },
   {
     "month": "2026-05",
-    "bear": 0.0,
-    "range": 0.3,
-    "bull": 0.7,
-    "label": "牛市",
-    "index_close": 40891.82
+    "bear": 0.105,
+    "range": 0.44,
+    "bull": 0.455,
+    "label": "偏多震盪",
+    "index_close": 40175.56
   }
 ]
