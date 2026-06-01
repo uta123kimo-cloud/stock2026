@@ -1,11 +1,11 @@
 {
   "market": "TW",
-  "index_close": 44732.94,
-  "index_chg_pct": 2.51,
-  "mkt_rsi": 72.9,
-  "mkt_slope_5d": 0.0736,
-  "mkt_slope_20d": 0.1443,
+  "index_close": 45337.91,
+  "index_chg_pct": 1.35,
+  "mkt_rsi": 74.77,
+  "mkt_slope_5d": 0.0675,
+  "mkt_slope_20d": 0.1389,
   "data_source": "FinMind_Y9999_TAIEX",
   "run_mode": "postmarket",
-  "generated_at": "2026-05-29 20:47"
+  "generated_at": "2026-06-01 23:57"
 }
