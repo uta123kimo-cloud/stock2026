@@ -6,12 +6,12 @@
   "active_strategy": "bull",
   "active_path": "45",
   "backup_path": "423",
-  "slope_5d": 0.0496,
-  "slope_20d": 0.1281,
-  "mkt_rsi": 78.0,
-  "adx": 25.84,
-  "index_close": 46459.16,
-  "index_chg_pct": 1.98,
+  "slope_5d": 0.0041,
+  "slope_20d": 0.0165,
+  "mkt_rsi": 100.0,
+  "adx": 24.81,
+  "index_close": 21000.0,
+  "index_chg_pct": 0.08,
   "history": [
     {
       "month": "2026-04",
@@ -35,10 +35,10 @@
       "range": 0.3,
       "bull": 0.7,
       "label": "牛市",
-      "index_close": 46459.16
+      "index_close": 21000.0
     }
   ],
   "data_source": "FinMind_Y9999_TAIEX",
   "run_mode": "postmarket",
-  "generated_at": "2026-06-03 22:40"
+  "generated_at": "2026-06-04 20:44"
 }
