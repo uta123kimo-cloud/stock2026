@@ -2,25 +2,6 @@
   "market": "TW",
   "positions": [
     {
-      "symbol": "3406",
-      "path": "45",
-      "ev": 4.48,
-      "ev_tier": "🔥主力",
-      "action": "持有",
-      "exit_signal": "—",
-      "quality": "Pure",
-      "days_held": 3,
-      "curr_ret_pct": -0.73,
-      "entry_price": 682.0,
-      "close": 677.0,
-      "tp1_price": 818.4,
-      "tp2_price": 866.6,
-      "stop_price": 632.8,
-      "regime": "bull",
-      "batch": 2,
-      "is_watchlist": false
-    },
-    {
       "symbol": "6153",
       "path": "45",
       "ev": 4.48,
@@ -28,12 +9,12 @@
       "action": "持有",
       "exit_signal": "—",
       "quality": "Pure",
-      "days_held": 2,
-      "curr_ret_pct": 1.97,
+      "days_held": 3,
+      "curr_ret_pct": -0.25,
       "entry_price": 20.35,
-      "close": 20.75,
+      "close": 20.3,
       "tp1_price": 24.4,
-      "tp2_price": 26.6,
+      "tp2_price": 26.0,
       "stop_price": 18.6,
       "regime": "bull",
       "batch": 1,
@@ -55,5 +36,5 @@
   "backup_path": "423",
   "path_counts": {},
   "run_mode": "postmarket",
-  "generated_at": "2026-06-10 20:57"
+  "generated_at": "2026-06-11 22:00"
 }
