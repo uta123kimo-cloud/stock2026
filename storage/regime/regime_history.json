@@ -25,10 +25,10 @@
   },
   {
     "month": "2026-07",
-    "bear": 0.06,
-    "range": 0.38,
-    "bull": 0.56,
+    "bear": 0.0,
+    "range": 0.3,
+    "bull": 0.7,
     "label": "牛市",
-    "index_close": 45479.11
+    "index_close": 21000.0
   }
 ]
