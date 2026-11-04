@@ -9,7 +9,7 @@
       "action": "持有",
       "exit_signal": "—",
       "quality": "Pure",
-      "days_held": 10,
+      "days_held": 11,
       "curr_ret_pct": 0.0,
       "entry_price": 94.6,
       "close": 94.6,
@@ -18,6 +18,25 @@
       "stop_price": 91.9,
       "regime": "bull",
       "batch": 1,
+      "is_watchlist": false
+    },
+    {
+      "symbol": "2412",
+      "path": "45",
+      "ev": 4.48,
+      "ev_tier": "🔥主力",
+      "action": "進場",
+      "exit_signal": "—",
+      "quality": "Pure",
+      "days_held": 0,
+      "curr_ret_pct": 0.0,
+      "entry_price": 161.5,
+      "close": 161.5,
+      "tp1_price": 193.8,
+      "tp2_price": 206.7,
+      "stop_price": 157.5,
+      "regime": "bull",
+      "batch": 2,
       "is_watchlist": false
     }
   ],
@@ -34,7 +53,9 @@
   "regime": "bull",
   "active_path": "45",
   "backup_path": "423",
-  "path_counts": {},
+  "path_counts": {
+    "45": 1
+  },
   "run_mode": "postmarket",
-  "generated_at": "2026-11-04 01:35"
+  "generated_at": "2026-11-05 01:47"
 }
