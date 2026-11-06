@@ -4,19 +4,38 @@
     {
       "symbol": "2456",
       "path": "45",
-      "ev": 4.48,
+      "ev": 3.46,
       "ev_tier": "🔥主力",
       "action": "持有",
       "exit_signal": "—",
       "quality": "Pure",
-      "days_held": 12,
+      "days_held": 13,
       "curr_ret_pct": 0.0,
       "entry_price": 94.6,
       "close": 94.6,
       "tp1_price": 113.5,
       "tp2_price": 121.1,
       "stop_price": 91.9,
-      "regime": "bull",
+      "regime": "range",
+      "batch": 1,
+      "is_watchlist": false
+    },
+    {
+      "symbol": "6443",
+      "path": "45",
+      "ev": 3.46,
+      "ev_tier": "🔥主力",
+      "action": "進場",
+      "exit_signal": "—",
+      "quality": "Pure",
+      "days_held": 0,
+      "curr_ret_pct": 0.0,
+      "entry_price": 25.95,
+      "close": 25.95,
+      "tp1_price": 31.1,
+      "tp2_price": 33.2,
+      "stop_price": 23.6,
+      "regime": "range",
       "batch": 1,
       "is_watchlist": false
     }
@@ -31,10 +50,12 @@
     "simple_cagr": 96.9,
     "pl_ratio": 2.31
   },
-  "regime": "bull",
-  "active_path": "45",
-  "backup_path": "423",
-  "path_counts": {},
+  "regime": "range",
+  "active_path": "423",
+  "backup_path": "45",
+  "path_counts": {
+    "45": 1
+  },
   "run_mode": "postmarket",
-  "generated_at": "2026-11-06 01:52"
+  "generated_at": "2026-11-07 01:13"
 }
